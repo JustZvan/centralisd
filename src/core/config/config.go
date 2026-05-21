@@ -14,8 +14,15 @@ const (
 	Slave        NodeType = "slave"
 )
 
+type SlaveYamlObject struct {
+	Master      string `yaml:"master"`
+	PrivKeyPath string `yaml:"privkeypath"`
+	PubKeyPath  string `yaml:"pubkeypath"`
+}
+
 type Config struct {
-	NodeType NodeType
+	NodeType NodeType        `yaml:"nodetype"`
+	Slave    SlaveYamlObject `yaml:"slave"`
 }
 
 func LoadConfig(path string) (Config, error) {

@@ -2,7 +2,9 @@ package main
 
 import (
 	"centralisd/src/core/config"
-	"centralisd/src/core/web"
+	"centralisd/src/master"
+	"centralisd/src/orchestrator/web"
+	"centralisd/src/slave"
 	"os"
 	"time"
 )
@@ -21,16 +23,20 @@ func main() {
 	if err != nil {
 		println("[-] Failed to read config, bailing!")
 		println(err.Error())
+
+		os.Exit(1)
 	}
 
 	switch configuration.NodeType {
 	case config.Orchestrator:
-		println("[+] We are Orchestrator, starting HTTP server!")
+		println("[+] we're orchestrator, starting HTTP server!")
 		go web.ServeWeb()
 	case config.Master:
-		println("[+] We are Master")
+		println("[+] we're master, listening!")
+		go master.HostMasterServer(49149)
 	case config.Slave:
-		println("[+] We are Slave, connecting to Master")
+		println("[+] We are slave, connecting to Master")
+		go slave.Connect(configuration.Slave.Master, configuration)
 	}
 
 	for {
