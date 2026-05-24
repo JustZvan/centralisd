@@ -1,0 +1,28 @@
+{{define "sidebar_nodes"}}
+<aside class="sidebar" x-on:click.stop>
+  <div class="sidebar-header">
+    <div>
+      <div class="sidebar-title">Server clusters</div>
+    </div>
+    <button
+      class="nav-btn"
+      style="width: 2.25rem; height: 2.25rem"
+      x-on:click="closeNodes()"
+      aria-label="Close"
+    >
+      <i class="fa-solid fa-xmark" style="font-size: 1rem"></i>
+    </button>
+  </div>
+  <div class="sidebar-body">
+    {{range .Clusters}}
+    <a
+      class="sidebar-link {{if eq $.ActiveCluster .}}active{{end}}"
+      href="/clusters/{{.}}"
+    >
+      <span class="name">{{.}}</span>
+      <span class="pill">Open</span>
+    </a>
+    {{end}}
+  </div>
+</aside>
+{{end}}

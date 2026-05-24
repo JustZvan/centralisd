@@ -6,6 +6,8 @@ import (
 	"github.com/goccy/go-yaml"
 )
 
+var VERSION = "0.0.0"
+
 type NodeType string
 
 const (

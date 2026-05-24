@@ -1,0 +1,25 @@
+{{define "nav_rail"}}
+<div class="nav-rail">
+  <div class="group">
+    <button
+      class="nav-btn"
+      x-bind:class="nodesOpen ? 'active' : ''"
+      x-on:click.stop="toggleNodes()"
+      title="Nodes"
+      aria-label="Nodes"
+    >
+      <i class="fa-solid fa-server"></i>
+    </button>
+  </div>
+
+  <div class="group">
+    <button
+      class="nav-btn"
+      title="Settings"
+      aria-label="Settings"
+    >
+      <i class="fa-solid fa-cog"></i>
+    </button>
+  </div>
+</div>
+{{end}}

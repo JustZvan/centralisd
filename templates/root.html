@@ -1,0 +1,21 @@
+{{define "root"}}
+<div
+  class="app"
+  x-data="{
+    nodesOpen: {{if .NodesOpen}}true{{else}}false{{end}},
+    toggleNodes() { this.nodesOpen = !this.nodesOpen },
+    closeNodes() { this.nodesOpen = false }
+  }"
+  x-on:keydown.escape.window="closeNodes()"
+>
+  {{template "nav_rail" .}}
+
+  <template x-if="nodesOpen">
+    {{template "sidebar_nodes" .}}
+  </template>
+
+  <div class="content" x-on:click="closeNodes()">
+    {{template "content" .}}
+  </div>
+</div>
+{{end}}

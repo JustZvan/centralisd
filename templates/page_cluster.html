@@ -1,0 +1,30 @@
+{{define "page_cluster"}}
+<div class="page">
+  <style>
+    .stats {
+      display: flex;
+      gap: 2rem;
+    }
+
+    .card {
+      padding: 3rem;
+      display: flex;
+
+      flex-direction: column;
+      justify-content: space-between;
+
+      border: 1px solid #fff;
+    }
+  </style>
+
+  <h1>{{.ActiveCluster}}</h1>
+
+  <div class="stats">
+    <div class="card">
+      <h3>Total nodes</h3>
+
+      <p>10</p>
+    </div>
+  </div>
+</div>
+{{end}}

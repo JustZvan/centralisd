@@ -1,0 +1,12 @@
+{{define "content"}}
+  {{if eq .ContentTemplate "page_home"}}
+    {{template "page_home" .}}
+  {{else if eq .ContentTemplate "page_cluster"}}
+    {{template "page_cluster" .}}
+  {{else}}
+    <div class="page">
+      <h1>Missing page</h1>
+      <p>Unknown content template.</p>
+    </div>
+  {{end}}
+{{end}}

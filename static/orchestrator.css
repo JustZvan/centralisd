@@ -1,0 +1,198 @@
+/* Orchestrator UI styles (shared across templates). */
+
+@font-face {
+  font-family: "Font Awesome 7 Free";
+  src: local("Font Awesome 7 Free"),
+    url("/static/fa6/webfonts/fa-solid-900.woff2");
+}
+
+:root {
+  --bg: #000;
+  --fg: #fff;
+  --inv-bg: #fff;
+  --inv-fg: #000;
+}
+
+* {
+  padding: 0;
+  margin: 0;
+  text-decoration: none;
+  font-family: sans-serif;
+}
+
+body {
+  background: var(--bg);
+  width: 100vw;
+  height: 100dvh;
+  color: var(--fg);
+}
+
+a,
+button {
+  color: inherit;
+}
+
+button {
+  background: transparent;
+  cursor: pointer;
+}
+
+.app {
+  width: 100vw;
+  height: 100dvh;
+  display: flex;
+  overflow: hidden;
+}
+
+.nav-rail {
+  width: 3rem;
+  height: 100%;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0;
+}
+
+.nav-rail .group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.nav-btn {
+  height: 3rem;
+  width: 3rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.15rem;
+  border-radius: 0;
+  background: transparent;
+}
+
+.nav-btn:hover {
+  background: var(--fg);
+  color: var(--inv-fg);
+}
+
+.nav-btn:hover i {
+  color: inherit;
+}
+
+.nav-btn.active {
+  background: var(--fg);
+  color: var(--inv-fg);
+}
+
+.nav-btn.active i {
+  color: inherit;
+}
+
+.sidebar {
+  width: 20rem;
+  height: 100%;
+  background: var(--bg);
+  color: var(--fg);
+  display: flex;
+  flex-direction: column;
+}
+
+.sidebar i {
+  color: inherit;
+}
+
+.sidebar-header {
+  height: 3.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 0.9rem;
+}
+
+.sidebar-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.sidebar-subtitle {
+  font-size: 0.75rem;
+  opacity: 0.7;
+}
+
+.sidebar-body {
+  padding: 0.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  overflow: auto;
+}
+
+.sidebar-link {
+  height: 2.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-radius: 0;
+  padding: 0 0.75rem;
+  background: transparent;
+}
+
+.sidebar-link:hover {
+  background: var(--fg);
+  color: var(--inv-fg);
+}
+
+.sidebar-link.active {
+  background: var(--fg);
+  color: var(--inv-fg);
+}
+
+.sidebar-link .name {
+  font-size: 0.9rem;
+}
+
+.sidebar-link .pill {
+  font-size: 0.75rem;
+  opacity: 0.7;
+}
+
+.content {
+  flex: 1;
+  height: 100%;
+  overflow: auto;
+}
+
+.page {
+  padding: 1.25rem;
+  max-width: 1100px;
+}
+
+.page h1 {
+  font-size: 1.35rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.page p {
+  margin-top: 0.5rem;
+  opacity: 0.7;
+}
+
+@media (max-width: 800px) {
+  .sidebar {
+    width: 18rem;
+  }
+}
+
+@media (max-width: 650px) {
+  .sidebar {
+    position: absolute;
+    left: 3rem;
+    top: 0;
+    bottom: 0;
+    z-index: 10;
+  }
+}
