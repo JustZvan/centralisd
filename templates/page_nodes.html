@@ -1,0 +1,35 @@
+{{define "page"}}
+<div class="page">
+  <h1>Nodes</h1>
+
+  <table>
+    <caption>
+      Nodes in cluster {{.ActiveCluster}}
+    </caption>
+    <thead>
+      <tr>
+        <th scope="col">Node Name</th>
+        <th scope="col">IP address (local)</th>
+        <th scope="col">Status</th>
+        <th scope="col">Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{if not .Nodes}}
+      <tr>
+        <td colspan="4">No nodes registered.</td>
+      </tr>
+      {{end}} {{range .Nodes}}
+      <tr>
+        <td>{{.Name}}</td>
+        <td>{{.IP}}</td>
+        <td>Online</td>
+        <td>
+          <a href="#" aria-disabled="true">Manage</a>
+        </td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+</div>
+{{end}}

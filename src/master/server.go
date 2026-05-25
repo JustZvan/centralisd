@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"log"
 	"net"
 	"os"
 	"strconv"
@@ -13,8 +14,10 @@ import (
 	"time"
 )
 
-func handleConnection(conn net.Conn) {
+func handleConnection(conn net.Conn, allowedNodes map[string]struct{}) {
 	defer conn.Close()
+	remote := conn.RemoteAddr().String()
+	log.Printf("master: incoming connection from %s", remote)
 
 	reader := bufio.NewReader(conn)
 	writer := bufio.NewWriter(conn)
@@ -27,7 +30,7 @@ func handleConnection(conn net.Conn) {
 	msg = strings.TrimSpace(msg)
 
 	if msg != "CENTRALISD" {
-		println("hoi")
+		log.Printf("master: %s bad hello %q", remote, msg)
 		writer.WriteString("FAIL\n")
 		writer.Flush()
 		return
@@ -42,6 +45,7 @@ func handleConnection(conn net.Conn) {
 
 	parts := strings.Split(msg, "|")
 	if len(parts) != 2 {
+		log.Printf("master: %s invalid id line %q", remote, msg)
 		writer.WriteString("FAIL\n")
 		writer.Flush()
 		return
@@ -52,6 +56,7 @@ func handleConnection(conn net.Conn) {
 
 	pubKeyBytes, err := base64.RawURLEncoding.DecodeString(pubKeyStr)
 	if err != nil {
+		log.Printf("master: %s invalid pubkey b64: %v", remote, err)
 		writer.WriteString("FAIL\n")
 		writer.Flush()
 		return
@@ -59,6 +64,7 @@ func handleConnection(conn net.Conn) {
 
 	clientIDRaw, err := base64.RawURLEncoding.DecodeString(clientIDStr)
 	if err != nil {
+		log.Printf("master: %s invalid client id b64: %v", remote, err)
 		writer.WriteString("FAIL\n")
 		writer.Flush()
 		return
@@ -67,9 +73,18 @@ func handleConnection(conn net.Conn) {
 	sum := sha256.Sum256(pubKeyBytes)
 
 	if !equal(sum[:], clientIDRaw) {
+		log.Printf("master: %s client id mismatch id=%s", remote, clientIDStr)
 		writer.WriteString("FAIL\n")
 		writer.Flush()
 		return
+	}
+	if len(allowedNodes) > 0 {
+		if _, ok := allowedNodes[clientIDStr]; !ok {
+			log.Printf("master: %s rejected: node not whitelisted id=%s", remote, clientIDStr)
+			writer.WriteString("FAIL\n")
+			writer.Flush()
+			return
+		}
 	}
 
 	pubKey := ed25519.PublicKey(pubKeyBytes)
@@ -88,14 +103,17 @@ func handleConnection(conn net.Conn) {
 
 	sig, err := base64.RawURLEncoding.DecodeString(sigLine)
 	if err != nil {
+		log.Printf("master: %s invalid signature b64: %v", remote, err)
 		writer.WriteString("FAIL\n")
 		writer.Flush()
 		return
 	}
 
 	if ed25519.Verify(pubKey, []byte(challenge), sig) {
+		log.Printf("master: %s auth ok id=%s", remote, clientIDStr)
 		writer.WriteString("OK\n")
 	} else {
+		log.Printf("master: %s auth failed id=%s", remote, clientIDStr)
 		writer.WriteString("FAIL\n")
 	}
 
@@ -109,22 +127,21 @@ func handleConnection(conn net.Conn) {
 	}
 }
 
-func HostMasterServer(port int) {
+func HostMasterServer(port int, allowedNodes map[string]struct{}) {
 	server, err := net.Listen("tcp", ":"+strconv.Itoa(port))
 	if err != nil {
 		os.Exit(1)
 	}
-
-	println("[+] Started server!")
+	log.Printf("master: tcp server listening on :%d", port)
 
 	for {
 		conn, err := server.Accept()
 		if err != nil {
-			println("[-] accept error:", err.Error())
+			log.Printf("master: accept error: %v", err)
 			continue
 		}
 
-		go handleConnection(conn)
+		go handleConnection(conn, allowedNodes)
 	}
 }
 

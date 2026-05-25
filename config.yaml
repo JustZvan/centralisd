@@ -1,1 +1,10 @@
 nodetype: "orchestrator"
+orchestrator:
+  weblisten: "localhost:8090"
+  tcplisten: ":49150"
+  dbpath: "./centralis.db"
+  masterwhitelist:
+    nl-amsterdam-1:
+      - id: "_L1b4UewpMk_tiijNLrd3kPTh8bvHNZNBdRN2UUwH_A"
+  statettlseconds: 60
+

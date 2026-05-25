@@ -27,3 +27,14 @@ main
 go.work
 
 # End of https://www.toptal.com/developers/gitignore/api/go
+
+# databases
+*.db
+
+# configs
+config.yaml
+config_master.yaml
+config_slave.yaml
+
+# keys
+*.pem

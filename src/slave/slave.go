@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
+	"log"
 	"net"
 	"os"
 	"strings"
@@ -24,7 +25,7 @@ func loadEd25519Public(path string) (ed25519.PublicKey, error) {
 
 	block, _ := pem.Decode(b)
 	if block == nil {
-		return nil, fmt.Errorf("invalid PEM public key")
+		return nil, fmt.Errorf("invalid pem public key")
 	}
 
 	pub, err := x509.ParsePKIXPublicKey(block.Bytes)
@@ -48,7 +49,7 @@ func loadEd25519Private(path string) (ed25519.PrivateKey, error) {
 
 	block, _ := pem.Decode(b)
 	if block == nil {
-		return nil, fmt.Errorf("invalid PEM private key")
+		return nil, fmt.Errorf("invalid pem private key")
 	}
 
 	key, err := x509.ParsePKCS8PrivateKey(block.Bytes)
@@ -67,116 +68,113 @@ func loadEd25519Private(path string) (ed25519.PrivateKey, error) {
 func Connect(addr string, cfg config.Config) {
 	conn, err := net.Dial("tcp", addr)
 	if err != nil {
-		fmt.Println("[-] connect:", err)
+		log.Printf("slave: connect: %v", err)
 		os.Exit(1)
 	}
 	defer conn.Close()
-
-	println("who")
 
 	reader := bufio.NewReader(conn)
 	writer := bufio.NewWriter(conn)
 
 	pubKey, err := loadEd25519Public(cfg.Slave.PubKeyPath)
 	if err != nil {
-		fmt.Println("[-] pubkey load:", err)
+		log.Printf("slave: pubkey load: %v", err)
 		os.Exit(1)
 	}
 
 	privKey, err := loadEd25519Private(cfg.Slave.PrivKeyPath)
 	if err != nil {
-		fmt.Println("[-] privkey load:", err)
+		log.Printf("slave: privkey load: %v", err)
 		os.Exit(1)
 	}
 
 	if _, err := writer.WriteString("CENTRALISD\n"); err != nil {
-		fmt.Println("[-] write HELLO:", err)
+		log.Printf("slave: write hello: %v", err)
 		os.Exit(1)
 	}
 	if err := writer.Flush(); err != nil {
-		fmt.Println("[-] flush HELLO:", err)
+		log.Printf("slave: flush hello: %v", err)
 		os.Exit(1)
 	}
-	fmt.Println("[+] sent HELLO")
+	log.Printf("slave: sent hello")
 
 	sum := sha256.Sum256(pubKey)
 	clientID := base64.RawURLEncoding.EncodeToString(sum[:])
 	pubKeyStr := base64.RawURLEncoding.EncodeToString(pubKey)
 
 	if _, err := writer.WriteString(clientID + "|" + pubKeyStr + "\n"); err != nil {
-		fmt.Println("[-] write ID:", err)
+		log.Printf("slave: write id: %v", err)
 		os.Exit(1)
 	}
 	if err := writer.Flush(); err != nil {
-		fmt.Println("[-] flush ID:", err)
+		log.Printf("slave: flush id: %v", err)
 		os.Exit(1)
 	}
-	fmt.Println("[+] sent ID")
+	log.Printf("slave: sent id")
 
 	challenge, err := reader.ReadString('\n')
 	if err != nil {
-		fmt.Println("[-] read challenge:", err)
+		log.Printf("slave: read challenge: %v", err)
 		os.Exit(1)
 	}
 	challenge = strings.TrimSpace(challenge)
 
 	if challenge == "FAIL" {
-		fmt.Println("[-] server rejected handshake")
+		log.Printf("slave: server rejected handshake")
 		os.Exit(1)
 	}
-	fmt.Println("[+] challenge:", challenge)
+	log.Printf("slave: challenge: %s", challenge)
 
 	sig := ed25519.Sign(privKey, []byte(challenge))
 	sigStr := base64.RawURLEncoding.EncodeToString(sig)
 
 	if _, err := writer.WriteString(sigStr + "\n"); err != nil {
-		fmt.Println("[-] write sig:", err)
+		log.Printf("slave: write signature: %v", err)
 		os.Exit(1)
 	}
 	if err := writer.Flush(); err != nil {
-		fmt.Println("[-] flush sig:", err)
+		log.Printf("slave: flush signature: %v", err)
 		os.Exit(1)
 	}
-	fmt.Println("[+] sent signature")
+	log.Printf("slave: sent signature")
 
 	resp, err := reader.ReadString('\n')
 	if err != nil {
-		fmt.Println("[-] auth response:", err)
+		log.Printf("slave: auth response: %v", err)
 		os.Exit(1)
 	}
 
 	resp = strings.TrimSpace(resp)
-	fmt.Println("[+] auth:", resp)
+	log.Printf("slave: auth: %s", resp)
 
 	if resp != "OK" {
-		fmt.Println("[-] auth failed")
+		log.Printf("slave: auth failed")
 		return
 	}
 
-	fmt.Println("[+] connected")
+	log.Printf("slave: connected")
 
 	for {
 		resp, err = reader.ReadString('\n')
 		if err != nil {
-			fmt.Println("[-] heartbeat read:", err)
+			log.Printf("slave: heartbeat read: %v", err)
 			return
 		}
 
 		resp = strings.TrimSpace(resp)
 
 		if resp == "HEARTBEAT" {
-			fmt.Println("[+] heartbeat")
+			log.Printf("slave: heartbeat")
 
 			hw := hardware.GetHardwareInfo()
 			json_hw_b, err := json.Marshal(hw)
 			if err != nil {
-				fmt.Println("[-] hw marshal:", err)
+				log.Printf("slave: hw marshal: %v", err)
 				return
 			}
-
-			fmt.Println("[+] hw:", string(json_hw_b))
+			log.Printf("slave: hw: %s", string(json_hw_b))
 		} else {
-			fmt.Println("[-] unexpected:", resp)
+			log.Printf("slave: unexpected: %s", resp)
 		}
 	}
 }

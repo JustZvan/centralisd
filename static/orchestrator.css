@@ -2,8 +2,8 @@
 
 @font-face {
   font-family: "Font Awesome 7 Free";
-  src: local("Font Awesome 7 Free"),
-    url("/static/fa6/webfonts/fa-solid-900.woff2");
+  src:
+    local("Font Awesome 7 Free"), url("/static/fa6/webfonts/fa-solid-900.woff2");
 }
 
 :root {
@@ -138,6 +138,16 @@ button {
   border-radius: 0;
   padding: 0 0.75rem;
   background: transparent;
+}
+
+.sidebar-sublink {
+  padding-left: 2rem;
+  height: 2.25rem;
+}
+
+.sidebar-sublink .name {
+  font-size: 0.85rem;
+  opacity: 0.9;
 }
 
 .sidebar-link:hover {

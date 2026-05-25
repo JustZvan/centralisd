@@ -1,1 +1,9 @@
 nodetype: master
+master:
+  orchestrator: "127.0.0.1:49150"
+  cluster: "nl-amsterdam-1"
+  name: "master-1"
+  advertise: "127.0.0.1:49149"
+  pubkeypath: "ed25519_public.pem"
+  privkeypath: "ed25519_private.pem"
+  allowednodes: []

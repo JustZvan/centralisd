@@ -1,4 +1,4 @@
-{{define "page_cluster"}}
+{{define "page"}}
 <div class="page">
   <style>
     .stats {
@@ -18,6 +18,12 @@
   </style>
 
   <h1>{{.ActiveCluster}}</h1>
+
+  {{if .ClusterOnline}}
+  <p><strong>Status:</strong> Online</p>
+  {{else}}
+  <p><strong>Status:</strong> Offline</p>
+  {{end}}
 
   <div class="stats">
     <div class="card">

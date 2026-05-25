@@ -22,6 +22,33 @@
       <span class="name">{{.}}</span>
       <span class="pill">Open</span>
     </a>
+
+    {{if eq $.ActiveCluster .}}
+    <a
+      class="sidebar-link sidebar-sublink {{if eq $.ActiveClusterItem "vms"}}active{{end}}"
+      href="/clusters/{{.}}/vms"
+    >
+      <span class="name">VMs</span>
+    </a>
+    <a
+      class="sidebar-link sidebar-sublink {{if eq $.ActiveClusterItem "reverse-proxy"}}active{{end}}"
+      href="/clusters/{{.}}/reverse-proxy"
+    >
+      <span class="name">Reverse Proxy</span>
+    </a>
+    <a
+      class="sidebar-link sidebar-sublink {{if eq $.ActiveClusterItem "nodes"}}active{{end}}"
+      href="/clusters/{{.}}/nodes"
+    >
+      <span class="name">Nodes</span>
+    </a>
+    <a
+      class="sidebar-link sidebar-sublink {{if eq $.ActiveClusterItem "firewall"}}active{{end}}"
+      href="/clusters/{{.}}/firewall"
+    >
+      <span class="name">Firewall</span>
+    </a>
+    {{end}}
     {{end}}
   </div>
 </aside>

@@ -1,6 +1,7 @@
 package hardware
 
 import (
+	"log"
 	"time"
 
 	"github.com/shirou/gopsutil/v4/cpu"
@@ -26,8 +27,7 @@ func GetHardwareInfo() HardwareInfo {
 	cpu_usage, err := cpu.Percent(3*time.Second, false)
 
 	if err != nil {
-		println("[-] error occured in GetHardwareInfo")
-		println(err.Error())
+		log.Printf("hardware: get hardware info: %v", err)
 	}
 
 	return HardwareInfo{
