@@ -11,6 +11,7 @@ import (
 type HardwareInfo struct {
 	RAM *mem.VirtualMemoryStat
 	CPU float64
+	CPUCores int
 }
 
 func GetHardwareInfo() HardwareInfo {
@@ -30,8 +31,11 @@ func GetHardwareInfo() HardwareInfo {
 		log.Printf("hardware: get hardware info: %v", err)
 	}
 
+	cores, _ := cpu.Counts(true)
+
 	return HardwareInfo{
-		CPU: cpu_usage[0],
-		RAM: ram,
+		CPU:      cpu_usage[0],
+		RAM:      ram,
+		CPUCores: cores,
 	}
 }

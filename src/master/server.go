@@ -2,15 +2,13 @@ package master
 
 import (
 	"bufio"
+	"centralisd/src/core/protocol"
 	"crypto/ed25519"
-	"crypto/rand"
-	"crypto/sha256"
 	"encoding/base64"
 	"log"
 	"net"
 	"os"
 	"strconv"
-	"strings"
 	"time"
 )
 
@@ -22,107 +20,95 @@ func handleConnection(conn net.Conn, allowedNodes map[string]struct{}) {
 	reader := bufio.NewReader(conn)
 	writer := bufio.NewWriter(conn)
 
-	msg, err := reader.ReadString('\n')
+	if err := protocol.ReadHello(reader, protocol.HeaderMasterSlave); err != nil {
+		log.Printf("master: %s bad hello %v", remote, err)
+		_ = protocol.WritePacket(writer, protocol.NewError("invalid hello"))
+		return
+	}
+
+	authPacket, err := protocol.ReadPacket(reader)
 	if err != nil {
 		return
 	}
-
-	msg = strings.TrimSpace(msg)
-
-	if msg != "CENTRALISD" {
-		log.Printf("master: %s bad hello %q", remote, msg)
-		writer.WriteString("FAIL\n")
-		writer.Flush()
+	if authPacket.Type != string(protocol.PacketAuthHello) {
+		log.Printf("master: %s bad auth type %q", remote, authPacket.Type)
+		_ = protocol.WritePacket(writer, protocol.NewError("auth wrong type"))
 		return
 	}
-
-	msg, err = reader.ReadString('\n')
-	if err != nil {
+	authHello := protocol.AuthHello{}
+	if err := protocol.DecodePayload(authPacket, &authHello); err != nil {
+		log.Printf("master: %s invalid auth payload: %v", remote, err)
+		_ = protocol.WritePacket(writer, protocol.NewError("auth payload invalid"))
 		return
 	}
-
-	msg = strings.TrimSpace(msg)
-
-	parts := strings.Split(msg, "|")
-	if len(parts) != 2 {
-		log.Printf("master: %s invalid id line %q", remote, msg)
-		writer.WriteString("FAIL\n")
-		writer.Flush()
+	if authHello.Role != "slave" {
+		log.Printf("master: %s invalid role %q", remote, authHello.Role)
+		_ = protocol.WritePacket(writer, protocol.NewError("auth wrong role"))
 		return
 	}
-
-	clientIDStr := parts[0]
-	pubKeyStr := parts[1]
-
-	pubKeyBytes, err := base64.RawURLEncoding.DecodeString(pubKeyStr)
+	pubKeyBytes, err := base64.RawURLEncoding.DecodeString(authHello.PubKey)
 	if err != nil {
 		log.Printf("master: %s invalid pubkey b64: %v", remote, err)
-		writer.WriteString("FAIL\n")
-		writer.Flush()
+		_ = protocol.WritePacket(writer, protocol.NewError("invalid pubkey"))
 		return
 	}
-
-	clientIDRaw, err := base64.RawURLEncoding.DecodeString(clientIDStr)
-	if err != nil {
-		log.Printf("master: %s invalid client id b64: %v", remote, err)
-		writer.WriteString("FAIL\n")
-		writer.Flush()
-		return
-	}
-
-	sum := sha256.Sum256(pubKeyBytes)
-
-	if !equal(sum[:], clientIDRaw) {
-		log.Printf("master: %s client id mismatch id=%s", remote, clientIDStr)
-		writer.WriteString("FAIL\n")
-		writer.Flush()
+	if !protocol.VerifyIDForPublicKey(authHello.ID, pubKeyBytes) {
+		log.Printf("master: %s client id mismatch id=%s", remote, authHello.ID)
+		_ = protocol.WritePacket(writer, protocol.NewError("id mismatch"))
 		return
 	}
 	if len(allowedNodes) > 0 {
-		if _, ok := allowedNodes[clientIDStr]; !ok {
-			log.Printf("master: %s rejected: node not whitelisted id=%s", remote, clientIDStr)
-			writer.WriteString("FAIL\n")
-			writer.Flush()
+		if _, ok := allowedNodes[authHello.ID]; !ok {
+			log.Printf("master: %s rejected: node not whitelisted id=%s", remote, authHello.ID)
+			_ = protocol.WritePacket(writer, protocol.NewError("node not allowed"))
 			return
 		}
 	}
 
+	challenge := protocol.GenerateChallenge()
+	challengePacket, _ := protocol.NewPacket(string(protocol.PacketAuthChallenge), protocol.AuthChallenge{Challenge: challenge})
+	if err := protocol.WritePacket(writer, challengePacket); err != nil {
+		return
+	}
+
+	proofPacket, err := protocol.ReadPacket(reader)
+	if err != nil {
+		return
+	}
+	if proofPacket.Type != string(protocol.PacketAuthProof) {
+		log.Printf("master: %s invalid proof type %q", remote, proofPacket.Type)
+		_ = protocol.WritePacket(writer, protocol.NewError("auth proof wrong type"))
+		return
+	}
+	proof := protocol.AuthProof{}
+	if err := protocol.DecodePayload(proofPacket, &proof); err != nil {
+		log.Printf("master: %s invalid proof payload: %v", remote, err)
+		_ = protocol.WritePacket(writer, protocol.NewError("auth proof invalid"))
+		return
+	}
 	pubKey := ed25519.PublicKey(pubKeyBytes)
-
-	challenge := generateChallenge()
-
-	writer.WriteString(challenge + "\n")
-	writer.Flush()
-
-	sigLine, err := reader.ReadString('\n')
-	if err != nil {
+	if !protocol.VerifyChallengeSignature(pubKey, challenge, proof.Signature) {
+		log.Printf("master: %s auth failed id=%s", remote, authHello.ID)
+		_ = protocol.WritePacket(writer, protocol.NewError("auth failed"))
 		return
 	}
+	log.Printf("master: %s auth ok id=%s", remote, authHello.ID)
+	okPacket, _ := protocol.NewPacket(string(protocol.PacketAuthOK), nil)
+	_ = protocol.WritePacket(writer, okPacket)
 
-	sigLine = strings.TrimSpace(sigLine)
-
-	sig, err := base64.RawURLEncoding.DecodeString(sigLine)
-	if err != nil {
-		log.Printf("master: %s invalid signature b64: %v", remote, err)
-		writer.WriteString("FAIL\n")
-		writer.Flush()
-		return
-	}
-
-	if ed25519.Verify(pubKey, []byte(challenge), sig) {
-		log.Printf("master: %s auth ok id=%s", remote, clientIDStr)
-		writer.WriteString("OK\n")
-	} else {
-		log.Printf("master: %s auth failed id=%s", remote, clientIDStr)
-		writer.WriteString("FAIL\n")
-	}
-
-	writer.Flush()
+	node := registerNode(authHello.ID, conn, reader, writer)
+	go node.readLoop()
+	defer unregisterNode(authHello.ID)
 
 	for {
-		writer.WriteString("HEARTBEAT\n")
-		writer.Flush()
-
+		packet, err := protocol.NewPacket(string(protocol.PacketHeartbeat), nil)
+		if err != nil {
+			return
+		}
+		if _, err := node.sendRequest(packet, 5*time.Second); err != nil {
+			log.Printf("master: %s heartbeat request: %v", remote, err)
+			return
+		}
 		time.Sleep(time.Second * 10)
 	}
 }
@@ -143,22 +129,4 @@ func HostMasterServer(port int, allowedNodes map[string]struct{}) {
 
 		go handleConnection(conn, allowedNodes)
 	}
-}
-
-func generateChallenge() string {
-	b := make([]byte, 64)
-	_, _ = rand.Read(b)
-	return base64.RawURLEncoding.EncodeToString(b)
-}
-
-func equal(a, b []byte) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }

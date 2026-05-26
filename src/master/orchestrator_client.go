@@ -3,6 +3,7 @@ package master
 import (
 	"bufio"
 	"centralisd/src/core/config"
+	"centralisd/src/core/protocol"
 	"centralisd/src/orchestrator/registry"
 	"crypto/ed25519"
 	"crypto/sha256"
@@ -16,13 +17,22 @@ import (
 	"net"
 	"os"
 	"strings"
+	"sync"
 	"time"
 )
 
-type orchEnvelope struct {
-	Type      string              `json:"type"`
-	Master    registry.MasterInfo `json:"master"`
-	Signature string              `json:"signature,omitempty"`
+type packetWriter struct {
+	mu     sync.Mutex
+	writer *bufio.Writer
+}
+
+func (w *packetWriter) writePacket(packet protocol.Packet) error {
+	if w == nil || w.writer == nil {
+		return io.ErrClosedPipe
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return protocol.WritePacket(w.writer, packet)
 }
 
 func ConnectToOrchestrator(cfg config.Config) {
@@ -69,21 +79,24 @@ func connectLoop(addr string, cfg config.Config) error {
 	log.Printf("master: orchestrator connected remote=%s", conn.RemoteAddr().String())
 
 	reader := bufio.NewReader(conn)
-	writer := bufio.NewWriter(conn)
+	writer := &packetWriter{writer: bufio.NewWriter(conn)}
 
-	if _, err := writer.WriteString("CENTRALISD-ORCH/1\n"); err != nil {
-		return err
-	}
-	if err := writer.Flush(); err != nil {
+	if err := protocol.WriteHello(writer.writer, protocol.HeaderOrchestrator); err != nil {
 		return err
 	}
 
 	// Orchestrator sends challenge, we respond with signed proof.
-	challenge, err := reader.ReadString('\n')
+	challengePacket, err := protocol.ReadPacket(reader)
 	if err != nil {
 		return err
 	}
-	challenge = strings.TrimSpace(challenge)
+	if challengePacket.Type != string(protocol.PacketAuthChallenge) {
+		return fmt.Errorf("unexpected challenge packet type %q", challengePacket.Type)
+	}
+	challengePayload := protocol.AuthChallenge{}
+	if err := protocol.DecodePayload(challengePacket, &challengePayload); err != nil {
+		return err
+	}
 
 	pubKeyBytes, privKey, err := loadMasterKeys(cfg)
 	if err != nil {
@@ -94,15 +107,57 @@ func connectLoop(addr string, cfg config.Config) error {
 
 	log.Println("our public key hash is: " + miAuth.PubKey)
 
-	sig := ed25519.Sign(privKey, []byte(challenge))
-	if err := sendAndExpectOK(reader, writer, orchEnvelope{Type: "master.auth", Master: miAuth, Signature: base64RawURL(sig)}); err != nil {
+	authHello := protocol.AuthHello{
+		ID:        miAuth.ID,
+		PubKey:    miAuth.PubKey,
+		Role:      "master",
+		Name:      miAuth.Name,
+		Cluster:   miAuth.Cluster,
+		Advertise: miAuth.Advertise,
+	}
+	authPacket, err := protocol.NewPacket(string(protocol.PacketAuthHello), authHello)
+	if err != nil {
 		return err
+	}
+	sig := ed25519.Sign(privKey, []byte(challengePayload.Challenge))
+	proofPacket, err := protocol.NewPacket(string(protocol.PacketAuthProof), protocol.AuthProof{Signature: base64RawURL(sig)})
+	if err != nil {
+		return err
+	}
+	if err := writer.writePacket(authPacket); err != nil {
+		return err
+	}
+	if err := writer.writePacket(proofPacket); err != nil {
+		return err
+	}
+	authResp, err := protocol.ReadPacket(reader)
+	if err != nil {
+		return err
+	}
+	if authResp.Type == string(protocol.PacketError) {
+		if strings.TrimSpace(authResp.Error) != "" {
+			return fmt.Errorf("orchestrator auth failed: %s", strings.TrimSpace(authResp.Error))
+		}
+		return fmt.Errorf("orchestrator auth failed")
+	}
+	if authResp.Type != string(protocol.PacketAuthOK) {
+		return fmt.Errorf("unexpected auth response %q", authResp.Type)
 	}
 	log.Printf("master: orchestrator auth ok")
 
+	respCh := make(chan protocol.Packet)
+	readErrCh := make(chan error, 1)
+	go func() {
+		readErrCh <- readOrchestratorLoop(reader, writer, respCh)
+	}()
+
 	mi := buildMasterInfo(cfg)
 	mi.PubKey = "" // don’t keep retransmitting key after auth
-	if err := sendAndExpectOK(reader, writer, orchEnvelope{Type: "master.register", Master: mi}); err != nil {
+	registerPacket, err := protocol.NewPacket(string(protocol.PacketMasterRegister), mi.MasterInfo)
+	if err != nil {
+		return err
+	}
+	if err := sendPacketAndExpectAuthOK(writer, respCh, readErrCh, registerPacket); err != nil {
 		return err
 	}
 	log.Printf("master: orchestrator register ok")
@@ -110,39 +165,170 @@ func connectLoop(addr string, cfg config.Config) error {
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		mi = buildMasterInfo(cfg)
-		mi.PubKey = "" // don’t keep retransmitting key after auth
-		if err := sendAndExpectOK(reader, writer, orchEnvelope{Type: "master.heartbeat", Master: mi}); err != nil {
+	for {
+		select {
+		case err := <-readErrCh:
+			if err == nil {
+				return io.ErrUnexpectedEOF
+			}
 			return err
+		case <-ticker.C:
+			mi = buildMasterInfo(cfg)
+			mi.PubKey = "" // don’t keep retransmitting key after auth
+			heartbeatPacket, err := protocol.NewPacket(string(protocol.PacketMasterHeartbeat), mi.MasterInfo)
+			if err != nil {
+				return err
+			}
+			if err := sendPacketAndExpectAuthOK(writer, respCh, readErrCh, heartbeatPacket); err != nil {
+				return err
+			}
+			log.Printf("master: orchestrator heartbeat ok")
 		}
-		log.Printf("master: orchestrator heartbeat ok")
 	}
 
 	return nil
 }
 
-func sendAndExpectOK(reader *bufio.Reader, writer *bufio.Writer, env orchEnvelope) error {
-	b, err := json.Marshal(env)
-	if err != nil {
-		return err
-	}
-	if _, err := writer.WriteString(string(b) + "\n"); err != nil {
-		return err
-	}
-	if err := writer.Flush(); err != nil {
+func sendPacketAndExpectAuthOK(writer *packetWriter, respCh <-chan protocol.Packet, readErrCh <-chan error, packet protocol.Packet) error {
+	if err := writer.writePacket(packet); err != nil {
 		return err
 	}
 
-	resp, err := reader.ReadString('\n')
-	if err != nil {
+	select {
+	case resp := <-respCh:
+		if resp.Type == string(protocol.PacketError) {
+			if strings.TrimSpace(resp.Error) != "" {
+				return fmt.Errorf("orchestrator error: %s", strings.TrimSpace(resp.Error))
+			}
+			return fmt.Errorf("orchestrator replied %q", resp.Type)
+		}
+		if resp.Type != string(protocol.PacketAuthOK) {
+			return fmt.Errorf("orchestrator replied %q", resp.Type)
+		}
+		return nil
+	case err := <-readErrCh:
+		if err == nil {
+			return io.ErrUnexpectedEOF
+		}
 		return err
 	}
-	resp = strings.TrimSpace(resp)
-	if resp != "OK" {
-		return fmt.Errorf("orchestrator replied %q", resp)
+}
+
+func readOrchestratorLoop(reader *bufio.Reader, writer *packetWriter, respCh chan<- protocol.Packet) error {
+	for {
+		packet, err := protocol.ReadPacket(reader)
+		if err != nil {
+			return err
+		}
+		if packet.Type == string(protocol.PacketAuthOK) || packet.Type == string(protocol.PacketError) {
+			respCh <- packet
+			continue
+		}
+		if packet.Type != string(protocol.PacketOrchCommand) {
+			log.Printf("master: orchestrator message unknown type=%q", packet.Type)
+			continue
+		}
+		cmd := protocol.OrchestratorCommand{}
+		if err := protocol.DecodePayload(packet, &cmd); err != nil {
+			log.Printf("master: orchestrator command invalid payload: %v", err)
+			continue
+		}
+		if len(cmd.Command) == 0 {
+			log.Printf("master: orchestrator command missing command node_id=%s", cmd.NodeID)
+			continue
+		}
+		if cmd.NodeID == "" {
+			replyPayload := handleMasterCommand(cmd.Command)
+			reply, _ := protocol.NewReply(string(protocol.PacketOrchCommandReply), packet.ID, replyPayload)
+			_ = writer.writePacket(reply)
+			continue
+		}
+		cmdPacket, err := protocol.NewPacket(string(protocol.PacketNodeCommand), json.RawMessage(cmd.Command))
+		if err != nil {
+			log.Printf("master: orchestrator command packet failed: %v", err)
+			continue
+		}
+		respPacket, err := sendCommandToNodeWait(cmd.NodeID, cmdPacket, 10*time.Second)
+		if err != nil {
+			reply, _ := protocol.NewReply(string(protocol.PacketOrchCommandReply), packet.ID, protocol.CommandReply{NodeID: cmd.NodeID, Status: "error", Message: err.Error()})
+			_ = writer.writePacket(reply)
+			continue
+		}
+		if respPacket.Type != string(protocol.PacketNodeCommandReply) {
+			reply, _ := protocol.NewReply(string(protocol.PacketOrchCommandReply), packet.ID, protocol.CommandReply{NodeID: cmd.NodeID, Status: "error", Message: "unexpected reply type"})
+			_ = writer.writePacket(reply)
+			continue
+		}
+		replyPayload := protocol.CommandReply{}
+		if err := protocol.DecodePayload(respPacket, &replyPayload); err != nil {
+			reply, _ := protocol.NewReply(string(protocol.PacketOrchCommandReply), packet.ID, protocol.CommandReply{NodeID: cmd.NodeID, Status: "error", Message: "invalid reply payload"})
+			_ = writer.writePacket(reply)
+			continue
+		}
+		replyPayload.NodeID = cmd.NodeID
+		reply, _ := protocol.NewReply(string(protocol.PacketOrchCommandReply), packet.ID, replyPayload)
+		_ = writer.writePacket(reply)
 	}
-	return nil
+}
+
+func handleMasterCommand(command json.RawMessage) protocol.CommandReply {
+	cmd := protocol.NodeCommand{}
+	if err := json.Unmarshal(command, &cmd); err != nil {
+		return protocol.CommandReply{Status: "error", Message: "invalid command"}
+	}
+
+	switch cmd.Action {
+	case "libvirt.domains.list":
+		nodeIDs := listConnectedNodeIDs()
+		log.Printf("master: aggregating vm list across %d connected nodes", len(nodeIDs))
+
+		results := make([]protocol.VMListNode, 0, len(nodeIDs))
+		for _, nodeID := range nodeIDs {
+			if strings.TrimSpace(nodeID) == "" {
+				continue
+			}
+
+			cmdPacket, err := protocol.NewPacket(string(protocol.PacketNodeCommand), json.RawMessage(command))
+			if err != nil {
+				return protocol.CommandReply{Status: "error", Message: "invalid command packet"}
+			}
+
+			respPacket, err := sendCommandToNodeWait(nodeID, cmdPacket, 10*time.Second)
+			if err != nil {
+				results = append(results, protocol.VMListNode{NodeID: nodeID, Error: err.Error()})
+				continue
+			}
+			if respPacket.Type != string(protocol.PacketNodeCommandReply) {
+				results = append(results, protocol.VMListNode{NodeID: nodeID, Error: "unexpected reply type"})
+				continue
+			}
+
+			replyPayload := protocol.CommandReply{}
+			if err := protocol.DecodePayload(respPacket, &replyPayload); err != nil {
+				results = append(results, protocol.VMListNode{NodeID: nodeID, Error: "invalid reply payload"})
+				continue
+			}
+			if replyPayload.Status != "ok" {
+				results = append(results, protocol.VMListNode{NodeID: nodeID, Error: replyPayload.Message})
+				continue
+			}
+
+			items := []protocol.VMDomain{}
+			if err := json.Unmarshal(replyPayload.Output, &items); err != nil {
+				results = append(results, protocol.VMListNode{NodeID: nodeID, Error: "invalid domain list"})
+				continue
+			}
+			results = append(results, protocol.VMListNode{NodeID: nodeID, Domains: items})
+		}
+
+		payload, err := json.Marshal(protocol.VMListAggregate{Nodes: results})
+		if err != nil {
+			return protocol.CommandReply{Status: "error", Message: "failed to encode domain list"}
+		}
+		return protocol.CommandReply{Status: "ok", Output: payload}
+	default:
+		return protocol.CommandReply{Status: "error", Message: "node id required"}
+	}
 }
 
 func buildMasterInfo(cfg config.Config) registry.MasterInfo {
@@ -163,20 +349,22 @@ func buildMasterInfo(cfg config.Config) registry.MasterInfo {
 		id = base64RawURL(sum[:])
 	}
 
-	nodes := []registry.NodeInfo{{
-		ID:   id,
-		Name: name,
-		IP:   strings.Join(getLocalIPs(), ","),
-	}}
+	nodes := make([]registry.NodeInfo, 0, 4)
+	for _, nodeID := range listConnectedNodeIDs() {
+		if strings.TrimSpace(nodeID) == "" {
+			continue
+		}
+		nodes = append(nodes, registry.NodeInfo{ID: nodeID})
+	}
 
-	return registry.MasterInfo{
+	return registry.MasterInfo{MasterInfo: protocol.MasterInfo{
 		ID:        id,
 		Name:      name,
 		Cluster:   cluster,
 		Advertise: adv,
 		PubKey:    "",
 		Nodes:     nodes,
-	}
+	}}
 }
 
 func loadMasterKeys(cfg config.Config) ([]byte, ed25519.PrivateKey, error) {

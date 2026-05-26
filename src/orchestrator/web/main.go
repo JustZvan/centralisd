@@ -1,11 +1,16 @@
 package web
 
 import (
+	"centralisd/src/core/protocol"
 	"centralisd/src/orchestrator/registry"
+	"centralisd/src/orchestrator/tcp"
 	ctmpl "centralisd/templates"
+	"encoding/json"
 	"html/template"
+	"log"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // TODO: Bundle templates with the app
@@ -19,7 +24,8 @@ type viewData struct {
 	ActiveCluster string
 	ClusterOnline bool
 
-	Nodes []registry.NodeInfo
+	Nodes     []registry.NodeInfo
+	VMDomains []protocol.VMListNode
 }
 
 type templates struct {
@@ -28,7 +34,6 @@ type templates struct {
 	vms          *template.Template
 	reverseProxy *template.Template
 	nodes        *template.Template
-	firewall     *template.Template
 }
 
 func parseTemplates() (*templates, error) {
@@ -64,7 +69,6 @@ func parseTemplates() (*templates, error) {
 	if err != nil {
 		return nil, err
 	}
-	firewall, err := parsePage("page_firewall.html")
 
 	return &templates{
 		home:         home,
@@ -72,7 +76,6 @@ func parseTemplates() (*templates, error) {
 		vms:          vms,
 		reverseProxy: reverseProxy,
 		nodes:        nodes,
-		firewall:     firewall,
 	}, nil
 }
 
@@ -146,10 +149,6 @@ func ServeWeb(store *registry.Store, listenAddr string) {
 				clusterItem = "nodes"
 				tmpl = tmpls.nodes
 				title = "Nodes: " + id
-			case "firewall":
-				clusterItem = "firewall"
-				tmpl = tmpls.firewall
-				title = "Firewall: " + id
 			default:
 				http.NotFound(w, r)
 				return
@@ -158,18 +157,62 @@ func ServeWeb(store *registry.Store, listenAddr string) {
 
 		nodes := store.NodesForCluster(id)
 
-		render(w, tmpl, viewData{
+		data := viewData{
 			Title:             title,
 			NodesOpen:         true,
 			ActiveCluster:     id,
 			ActiveClusterItem: clusterItem,
 			ClusterOnline:     store.IsClusterOnline(id),
 			Nodes:             nodes,
-		})
+		}
+
+		if clusterItem == "vms" {
+			data.VMDomains = fetchVMDomains(store, id)
+		}
+
+		render(w, tmpl, data)
 	})
 
 	if listenAddr == "" {
 		listenAddr = "localhost:8090"
 	}
 	http.ListenAndServe(listenAddr, app)
+}
+
+func fetchVMDomains(store *registry.Store, clusterID string) []protocol.VMListNode {
+	if store == nil || clusterID == "" {
+		return nil
+	}
+	storeMasters := store.MastersForCluster(clusterID)
+	log.Printf("orchestrator: vm page fetch cluster=%s masters=%d", clusterID, len(storeMasters))
+	if len(storeMasters) == 0 {
+		return nil
+	}
+	cmd := protocol.NodeCommand{Action: "libvirt.domains.list"}
+	cmdBytes, err := json.Marshal(cmd)
+	if err != nil {
+		return []protocol.VMListNode{{Error: "failed to build command"}}
+	}
+	results := make([]protocol.VMListNode, 0, len(storeMasters))
+	for _, master := range storeMasters {
+		if master.ID == "" {
+			continue
+		}
+		reply, err := tcp.SendMasterCommandWait(master.ID, json.RawMessage(cmdBytes), 10*time.Second)
+		if err != nil {
+			results = append(results, protocol.VMListNode{NodeID: master.ID, Error: err.Error()})
+			continue
+		}
+		if reply.Status != "ok" {
+			results = append(results, protocol.VMListNode{NodeID: master.ID, Error: reply.Message})
+			continue
+		}
+		aggregate := protocol.VMListAggregate{}
+		if err := json.Unmarshal(reply.Output, &aggregate); err != nil {
+			results = append(results, protocol.VMListNode{NodeID: master.ID, Error: "invalid domain list"})
+			continue
+		}
+		results = append(results, aggregate.Nodes...)
+	}
+	return results
 }

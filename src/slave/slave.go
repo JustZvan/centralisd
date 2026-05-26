@@ -3,9 +3,11 @@ package slave
 import (
 	"bufio"
 	"centralisd/src/core/config"
+	"centralisd/src/core/protocol"
+	"centralisd/src/slave/firewall"
 	"centralisd/src/slave/hardware"
+	"centralisd/src/slave/libvirt"
 	"crypto/ed25519"
-	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
@@ -14,7 +16,6 @@ import (
 	"log"
 	"net"
 	"os"
-	"strings"
 )
 
 func loadEd25519Public(path string) (ed25519.PublicKey, error) {
@@ -88,93 +89,169 @@ func Connect(addr string, cfg config.Config) {
 		os.Exit(1)
 	}
 
-	if _, err := writer.WriteString("CENTRALISD\n"); err != nil {
+	if err := protocol.WriteHello(writer, protocol.HeaderMasterSlave); err != nil {
 		log.Printf("slave: write hello: %v", err)
-		os.Exit(1)
-	}
-	if err := writer.Flush(); err != nil {
-		log.Printf("slave: flush hello: %v", err)
 		os.Exit(1)
 	}
 	log.Printf("slave: sent hello")
 
-	sum := sha256.Sum256(pubKey)
-	clientID := base64.RawURLEncoding.EncodeToString(sum[:])
+	clientID, err := protocol.IDFromPublicKey(pubKey)
+	if err != nil {
+		log.Printf("slave: id from pubkey: %v", err)
+		os.Exit(1)
+	}
 	pubKeyStr := base64.RawURLEncoding.EncodeToString(pubKey)
-
-	if _, err := writer.WriteString(clientID + "|" + pubKeyStr + "\n"); err != nil {
-		log.Printf("slave: write id: %v", err)
+	authHello := protocol.AuthHello{ID: clientID, PubKey: pubKeyStr, Role: "slave"}
+	packet, err := protocol.NewPacket(string(protocol.PacketAuthHello), authHello)
+	if err != nil {
+		log.Printf("slave: auth packet: %v", err)
 		os.Exit(1)
 	}
-	if err := writer.Flush(); err != nil {
-		log.Printf("slave: flush id: %v", err)
+	if err := protocol.WritePacket(writer, packet); err != nil {
+		log.Printf("slave: write auth: %v", err)
 		os.Exit(1)
 	}
-	log.Printf("slave: sent id")
+	log.Printf("slave: sent auth hello")
 
-	challenge, err := reader.ReadString('\n')
+	challengePacket, err := protocol.ReadPacket(reader)
 	if err != nil {
 		log.Printf("slave: read challenge: %v", err)
 		os.Exit(1)
 	}
-	challenge = strings.TrimSpace(challenge)
-
-	if challenge == "FAIL" {
+	if challengePacket.Type == string(protocol.PacketError) {
 		log.Printf("slave: server rejected handshake")
 		os.Exit(1)
 	}
-	log.Printf("slave: challenge: %s", challenge)
-
-	sig := ed25519.Sign(privKey, []byte(challenge))
-	sigStr := base64.RawURLEncoding.EncodeToString(sig)
-
-	if _, err := writer.WriteString(sigStr + "\n"); err != nil {
-		log.Printf("slave: write signature: %v", err)
+	if challengePacket.Type != string(protocol.PacketAuthChallenge) {
+		log.Printf("slave: unexpected challenge type: %s", challengePacket.Type)
 		os.Exit(1)
 	}
-	if err := writer.Flush(); err != nil {
-		log.Printf("slave: flush signature: %v", err)
+	challengePayload := protocol.AuthChallenge{}
+	if err := protocol.DecodePayload(challengePacket, &challengePayload); err != nil {
+		log.Printf("slave: challenge payload: %v", err)
+		os.Exit(1)
+	}
+	log.Printf("slave: challenge received")
+
+	sigStr, err := protocol.SignChallenge(privKey, challengePayload.Challenge)
+	if err != nil {
+		log.Printf("slave: sign challenge: %v", err)
+		os.Exit(1)
+	}
+	proofPacket, err := protocol.NewPacket(string(protocol.PacketAuthProof), protocol.AuthProof{Signature: sigStr})
+	if err != nil {
+		log.Printf("slave: proof packet: %v", err)
+		os.Exit(1)
+	}
+	if err := protocol.WritePacket(writer, proofPacket); err != nil {
+		log.Printf("slave: write signature: %v", err)
 		os.Exit(1)
 	}
 	log.Printf("slave: sent signature")
 
-	resp, err := reader.ReadString('\n')
+	respPacket, err := protocol.ReadPacket(reader)
 	if err != nil {
 		log.Printf("slave: auth response: %v", err)
 		os.Exit(1)
 	}
-
-	resp = strings.TrimSpace(resp)
-	log.Printf("slave: auth: %s", resp)
-
-	if resp != "OK" {
-		log.Printf("slave: auth failed")
+	if respPacket.Type != string(protocol.PacketAuthOK) {
+		log.Printf("slave: auth failed type=%s", respPacket.Type)
 		return
 	}
 
 	log.Printf("slave: connected")
+	log.Printf("slave: setting up firewall")
+
+	err = firewall.SetupFirewall(cfg)
+
+	if err != nil {
+		log.Printf("slave: firewall failed, this node is insecure!")
+		println(err.Error())
+	}
+
+	qemu, err := libvirt.GetQEMU()
+	networks, err := qemu.ListNetworks()
+
+	for i, element := range networks {
+		println(i)
+		println(element)
+	}
 
 	for {
-		resp, err = reader.ReadString('\n')
+		packet, err := protocol.ReadPacket(reader)
 		if err != nil {
-			log.Printf("slave: heartbeat read: %v", err)
+			log.Printf("slave: read packet: %v", err)
 			return
 		}
-
-		resp = strings.TrimSpace(resp)
-
-		if resp == "HEARTBEAT" {
+		switch packet.Type {
+		case string(protocol.PacketHeartbeat):
 			log.Printf("slave: heartbeat")
-
 			hw := hardware.GetHardwareInfo()
-			json_hw_b, err := json.Marshal(hw)
+			heartbeat := protocol.Heartbeat{
+				Usage: protocol.HeartbeatUsage{
+					CPUPercent: hw.CPU,
+					RAMPercent: hw.RAM.UsedPercent,
+				},
+				Hardware: protocol.HeartbeatHardware{
+					CPUCores: int(hw.CPUCores),
+					RAMBytes: hw.RAM.Total,
+				},
+			}
+			reply, err := protocol.NewReply(string(protocol.PacketHeartbeatReply), packet.ID, heartbeat)
 			if err != nil {
-				log.Printf("slave: hw marshal: %v", err)
+				log.Printf("slave: heartbeat reply: %v", err)
 				return
 			}
-			log.Printf("slave: hw: %s", string(json_hw_b))
-		} else {
-			log.Printf("slave: unexpected: %s", resp)
+			if err := protocol.WritePacket(writer, reply); err != nil {
+				log.Printf("slave: heartbeat send: %v", err)
+				return
+			}
+			continue
+		case string(protocol.PacketNodeCommand):
+			cmd := protocol.NodeCommand{}
+			if err := protocol.DecodePayload(packet, &cmd); err != nil {
+				log.Printf("slave: invalid command payload")
+				reply, _ := protocol.NewReply(string(protocol.PacketNodeCommandReply), packet.ID, protocol.CommandReply{Status: "error", Message: "invalid command"})
+				_ = protocol.WritePacket(writer, reply)
+				continue
+			}
+			log.Printf("slave: command action=%s", cmd.Action)
+			switch cmd.Action {
+			case "libvirt.domains.list":
+				qemu, err := libvirt.GetQEMU()
+				if err != nil {
+					reply, _ := protocol.NewReply(string(protocol.PacketNodeCommandReply), packet.ID, protocol.CommandReply{Status: "error", Message: err.Error()})
+					_ = protocol.WritePacket(writer, reply)
+					continue
+				}
+				domains, err := libvirt.GetDomains(qemu)
+				if err != nil {
+					reply, _ := protocol.NewReply(string(protocol.PacketNodeCommandReply), packet.ID, protocol.CommandReply{Status: "error", Message: err.Error()})
+					_ = protocol.WritePacket(writer, reply)
+					continue
+				}
+				items := make([]protocol.VMDomain, 0, len(domains))
+				for _, d := range domains {
+					name, _ := d.GetName()
+					uuid, _ := d.GetUUIDString()
+					id, _ := d.GetID()
+					active, _ := d.IsActive()
+					items = append(items, protocol.VMDomain{ID: uint32(id), UUID: uuid, Name: name, Active: active})
+					_ = d.Free()
+				}
+				payload, _ := json.Marshal(items)
+				reply, _ := protocol.NewReply(string(protocol.PacketNodeCommandReply), packet.ID, protocol.CommandReply{Status: "ok", Output: payload})
+				_ = protocol.WritePacket(writer, reply)
+			case "noop":
+				reply, _ := protocol.NewReply(string(protocol.PacketNodeCommandReply), packet.ID, protocol.CommandReply{Status: "ok"})
+				_ = protocol.WritePacket(writer, reply)
+			default:
+				log.Printf("slave: unknown command action=%s", cmd.Action)
+				reply, _ := protocol.NewReply(string(protocol.PacketNodeCommandReply), packet.ID, protocol.CommandReply{Status: "error", Message: "unknown action"})
+				_ = protocol.WritePacket(writer, reply)
+			}
+		default:
+			log.Printf("slave: unexpected packet type: %s", packet.Type)
 		}
 	}
 }

@@ -1,6 +1,40 @@
 {{define "page"}}
 <div class="page">
   <h1>VMs</h1>
-  <p>Coming soon.</p>
+  {{if .VMDomains}}
+    {{range .VMDomains}}
+      <div class="card">
+        <h2>Node {{.NodeID}}</h2>
+        {{if .Error}}
+          <p>{{.Error}}</p>
+        {{else if .Domains}}
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>UUID</th>
+                <th>ID</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {{range .Domains}}
+                <tr>
+                  <td>{{.Name}}</td>
+                  <td>{{.UUID}}</td>
+                  <td>{{.ID}}</td>
+                  <td>{{if .Active}}active{{else}}inactive{{end}}</td>
+                </tr>
+              {{end}}
+            </tbody>
+          </table>
+        {{else}}
+          <p>No domains.</p>
+        {{end}}
+      </div>
+    {{end}}
+  {{else}}
+    <p>No VM data available.</p>
+  {{end}}
 </div>
 {{end}}

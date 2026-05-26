@@ -1,27 +1,18 @@
 package registry
 
 import (
-	"sort"
-	"sync"
-	"time"
+    "centralisd/src/core/protocol"
+    "sort"
+    "sync"
+    "time"
 )
 
 type MasterInfo struct {
-	ID        string     `json:"id"`
-	Name      string     `json:"name"`
-	Cluster   string     `json:"cluster"`
-	Advertise string     `json:"advertise"`
-	PubKey    string     `json:"pubKey"`
-	Nodes     []NodeInfo `json:"nodes"`
-
+	protocol.MasterInfo
 	LastSeen time.Time `json:"lastSeen"`
 }
 
-type NodeInfo struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-	IP   string `json:"ip"`
-}
+type NodeInfo = protocol.NodeInfo
 
 type Store struct {
 	mu          sync.RWMutex
@@ -136,7 +127,7 @@ func (s *Store) IsClusterOnline(clusterID string) bool {
 	return false
 }
 
-func (s *Store) NodesForCluster(clusterID string) []NodeInfo {
+func (s *Store) NodesForCluster(clusterID string) []protocol.NodeInfo {
 	if clusterID == "" {
 		return nil
 	}
@@ -145,7 +136,29 @@ func (s *Store) NodesForCluster(clusterID string) []NodeInfo {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	out := make([]NodeInfo, 0, 8)
+    out := make([]protocol.NodeInfo, 0, 8)
+    for _, m := range s.mastersByID {
+        if m.Cluster != clusterID {
+            continue
+        }
+        if now.Sub(m.LastSeen) > s.ttl {
+            continue
+        }
+        out = append(out, m.Nodes...)
+    }
+	return out
+}
+
+func (s *Store) MastersForCluster(clusterID string) []MasterInfo {
+	if clusterID == "" {
+		return nil
+	}
+	now := time.Now()
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	out := make([]MasterInfo, 0, 4)
 	for _, m := range s.mastersByID {
 		if m.Cluster != clusterID {
 			continue
@@ -153,7 +166,7 @@ func (s *Store) NodesForCluster(clusterID string) []NodeInfo {
 		if now.Sub(m.LastSeen) > s.ttl {
 			continue
 		}
-		out = append(out, m.Nodes...)
+		out = append(out, m)
 	}
 	return out
 }
