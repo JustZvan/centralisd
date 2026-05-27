@@ -6,69 +6,196 @@
   <p><strong>IP address (local):</strong> {{.ActiveNode.IP}}</p>
 
   <div class="card">
-    <nav style="display: flex; gap: 1rem; margin-bottom: 1.5rem">
-      <a href="/clusters/{{.ActiveCluster}}/nodes/{{.ActiveNode.ID}}/docker">Containers</a>
-      <a href="/clusters/{{.ActiveCluster}}/nodes/{{.ActiveNode.ID}}/docker-images">Images</a>
-    </nav>
+    <div class="card-header">
+      <div>
+        <h2>Docker</h2>
+        <p class="muted">Manage images and containers on this node.</p>
+      </div>
+      <nav class="tabs">
+        <a
+          class="tab {{if eq .ActiveNodeItem "docker-containers"}}active{{end}}"
+          href="/clusters/{{.ActiveCluster}}/nodes/{{.ActiveNode.ID}}/docker"
+        >Containers</a>
+        <a
+          class="tab {{if eq .ActiveNodeItem "docker-images"}}active{{end}}"
+          href="/clusters/{{.ActiveCluster}}/nodes/{{.ActiveNode.ID}}/docker-images"
+        >Images</a>
+      </nav>
+    </div>
+
+    {{if .DockerActionError}}
+    <div class="notice notice-error">
+      {{.DockerActionError}}
+    </div>
+    {{else if .DockerAction}}
+    <div class="notice notice-success">Action completed.</div>
+    {{end}}
 
     {{if eq .ActiveNodeItem "docker-images"}}
-    <h2>Docker Images</h2>
-    {{if .DockerError}}
-    <p>{{.DockerError}}</p>
-    {{else if .DockerImages}}
-    <table>
-      <thead>
-        <tr>
-          <th>ID</th>
-          <th>Tags</th>
-          <th>Size</th>
-          <th>Created</th>
-        </tr>
-      </thead>
-      <tbody>
-        {{range .DockerImages}}
-        <tr>
-          <td>{{.ID}}</td>
-          <td>{{range $index, $tag := .RepoTags}}{{if $index}}, {{end}}{{$tag}}{{end}}</td>
-          <td>{{.Size}}</td>
-          <td>{{.Created}}</td>
-        </tr>
-        {{end}}
-      </tbody>
-    </table>
+    <div class="section">
+      <h3>Pull image</h3>
+      <form method="post" class="form-grid">
+        <input type="hidden" name="action" value="pull" />
+        <label>
+          <span>Image</span>
+          <input type="text" name="image" placeholder="nginx:latest" required />
+        </label>
+        <div class="form-actions">
+          <button class="btn" type="submit">Pull</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="section">
+      <h3>Images</h3>
+      {{if .DockerError}}
+      <p>{{.DockerError}}</p>
+      {{else if .DockerImages}}
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Tags</th>
+            <th>Size</th>
+            <th>Created</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .DockerImages}}
+          <tr>
+            <td>{{.ID}}</td>
+            <td>{{range $index, $tag := .RepoTags}}{{if $index}}, {{end}}{{$tag}}{{end}}</td>
+            <td>{{.Size}}</td>
+            <td>{{.Created}}</td>
+            <td>
+              <form method="post" class="inline-form">
+                <input type="hidden" name="action" value="remove" />
+                <input type="hidden" name="image" value="{{.ID}}" />
+                <label class="checkbox">
+                  <input type="checkbox" name="force" /> Force
+                </label>
+                <label class="checkbox">
+                  <input type="checkbox" name="prune_children" /> Prune
+                </label>
+                <button class="btn btn-ghost" type="submit">Remove</button>
+              </form>
+            </td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+      {{else}}
+      <p>No Docker images found.</p>
+      {{end}}
+    </div>
     {{else}}
-    <p>No Docker images found.</p>
-    {{end}}
-    {{else}}
-    <h2>Docker Containers</h2>
-    {{if .DockerError}}
-    <p>{{.DockerError}}</p>
-    {{else if .DockerContainers}}
-    <table>
-      <thead>
-        <tr>
-          <th>ID</th>
-          <th>Image</th>
-          <th>Names</th>
-          <th>State</th>
-          <th>Status</th>
-        </tr>
-      </thead>
-      <tbody>
-        {{range .DockerContainers}}
-        <tr>
-          <td>{{.ID}}</td>
-          <td>{{.Image}}</td>
-          <td>{{range $index, $name := .Names}}{{if $index}}, {{end}}{{$name}}{{end}}</td>
-          <td>{{.State}}</td>
-          <td>{{.Status}}</td>
-        </tr>
-        {{end}}
-      </tbody>
-    </table>
-    {{else}}
-    <p>No Docker containers found.</p>
-    {{end}}
+    <div class="section">
+      <h3>Create container</h3>
+      <form method="post" class="form-grid">
+        <input type="hidden" name="action" value="create" />
+        <label>
+          <span>Image</span>
+          <input type="text" name="image" placeholder="nginx:latest" required />
+        </label>
+        <label>
+          <span>Name</span>
+          <input type="text" name="name" placeholder="my-container" />
+        </label>
+        <label>
+          <span>Command</span>
+          <input type="text" name="command" placeholder="/bin/sh -c echo hello" />
+        </label>
+        <label>
+          <span>Entrypoint</span>
+          <input type="text" name="entrypoint" placeholder="/entrypoint.sh" />
+        </label>
+        <label>
+          <span>Working dir</span>
+          <input type="text" name="working_dir" placeholder="/app" />
+        </label>
+        <label>
+          <span>Env (one per line)</span>
+          <textarea name="env" rows="3" placeholder="KEY=value"></textarea>
+        </label>
+        <label>
+          <span>Ports (comma separated)</span>
+          <input type="text" name="ports" placeholder="80/tcp, 443/tcp" />
+        </label>
+        <label>
+          <span>Restart policy</span>
+          <select name="restart_policy">
+            <option value="">default</option>
+            <option value="no">no</option>
+            <option value="always">always</option>
+            <option value="on-failure">on-failure</option>
+            <option value="unless-stopped">unless-stopped</option>
+          </select>
+        </label>
+        <div class="form-row">
+          <label class="checkbox">
+            <input type="checkbox" name="publish_all" /> Publish all ports
+          </label>
+          <label class="checkbox">
+            <input type="checkbox" name="auto_remove" /> Auto remove
+          </label>
+          <label class="checkbox">
+            <input type="checkbox" name="start" checked /> Start after create
+          </label>
+        </div>
+        <div class="form-actions">
+          <button class="btn" type="submit">Create</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="section">
+      <h3>Containers</h3>
+      {{if .DockerError}}
+      <p>{{.DockerError}}</p>
+      {{else if .DockerContainers}}
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Image</th>
+            <th>Names</th>
+            <th>State</th>
+            <th>Status</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .DockerContainers}}
+          <tr>
+            <td>{{.ID}}</td>
+            <td>{{.Image}}</td>
+            <td>{{range $index, $name := .Names}}{{if $index}}, {{end}}{{$name}}{{end}}</td>
+            <td>{{.State}}</td>
+            <td>{{.Status}}</td>
+            <td>
+              <form method="post" class="inline-form">
+                <input type="hidden" name="container_id" value="{{.ID}}" />
+                <button class="btn btn-ghost" name="action" value="start" type="submit">Start</button>
+                <button class="btn btn-ghost" name="action" value="stop" type="submit">Stop</button>
+                <button class="btn btn-ghost" name="action" value="restart" type="submit">Restart</button>
+                <label class="checkbox">
+                  <input type="checkbox" name="force" /> Force
+                </label>
+                <label class="checkbox">
+                  <input type="checkbox" name="remove_volumes" /> Volumes
+                </label>
+                <button class="btn btn-ghost" name="action" value="remove" type="submit">Remove</button>
+              </form>
+            </td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+      {{else}}
+      <p>No Docker containers found.</p>
+      {{end}}
+    </div>
     {{end}}
   </div>
 </div>

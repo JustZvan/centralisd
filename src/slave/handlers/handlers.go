@@ -18,6 +18,13 @@ var PacketHandlers = map[string]packetHandler{
 var commandHandlers = map[string]commandHandler{
 	"docker.containers.list": handleDockerContainersList,
 	"docker.images.list":     handleDockerImagesList,
+	"docker.image.pull":       handleDockerImagePull,
+	"docker.image.remove":     handleDockerImageRemove,
+	"docker.container.create": handleDockerContainerCreate,
+	"docker.container.start":  handleDockerContainerStart,
+	"docker.container.stop":   handleDockerContainerStop,
+	"docker.container.restart": handleDockerContainerRestart,
+	"docker.container.remove":  handleDockerContainerRemove,
 	"libvirt.domains.list":   handleLibvirtDomainsList,
 	"noop":                   handleNoop,
 }

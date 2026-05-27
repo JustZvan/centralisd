@@ -6,9 +6,11 @@ import (
 	"centralisd/src/orchestrator/tcp"
 	ctmpl "centralisd/templates"
 	"encoding/json"
+	"errors"
 	"html/template"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -31,6 +33,8 @@ type viewData struct {
 	DockerContainers []protocol.DockerContainer
 	DockerImages     []protocol.DockerImage
 	DockerError      string
+	DockerAction     string
+	DockerActionError string
 }
 
 type templates struct {
@@ -103,7 +107,9 @@ func ServeWeb(store *registry.Store, listenAddr string) {
 
 	render := func(w http.ResponseWriter, tmpl *template.Template, data viewData) {
 		data.Clusters = store.ActiveClusters()
+		log.Printf("web: render start title=%s cluster=%s node=%s item=%s masters=%d", data.Title, data.ActiveCluster, data.ActiveNode.ID, data.ActiveNodeItem, len(store.MastersForCluster(data.ActiveCluster)))
 		if err := tmpl.ExecuteTemplate(w, "layout", data); err != nil {
+			log.Printf("web: render error title=%s cluster=%s node=%s item=%s err=%v", data.Title, data.ActiveCluster, data.ActiveNode.ID, data.ActiveNodeItem, err)
 			http.Error(w, "template render error", http.StatusInternalServerError)
 		}
 	}
@@ -121,6 +127,7 @@ func ServeWeb(store *registry.Store, listenAddr string) {
 	})
 
 	app.HandleFunc("/clusters/", func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("web: request method=%s path=%s", r.Method, r.URL.Path)
 		rest := strings.TrimPrefix(r.URL.Path, "/clusters/")
 		rest = strings.Trim(rest, "/")
 		if rest == "" {
@@ -139,6 +146,7 @@ func ServeWeb(store *registry.Store, listenAddr string) {
 			return
 		}
 		if !store.IsKnownCluster(id) {
+			log.Printf("web: unknown cluster id=%s", id)
 			http.NotFound(w, r)
 			return
 		}
@@ -186,6 +194,7 @@ func ServeWeb(store *registry.Store, listenAddr string) {
 			}
 			node, ok := findNode(nodes, parts[2])
 			if !ok {
+				log.Printf("web: node not found cluster=%s node=%s", id, parts[2])
 				http.NotFound(w, r)
 				return
 			}
@@ -195,7 +204,7 @@ func ServeWeb(store *registry.Store, listenAddr string) {
 			tmpl = tmpls.node
 			title = "Node: " + nodeLabel(node)
 			data.Title = title
-			if len(parts) == 3 || len(parts) == 4 {
+			if len(parts) >= 3 && len(parts) <= 4 {
 				sub := "docker"
 				if len(parts) == 4 {
 					sub = parts[3]
@@ -204,11 +213,45 @@ func ServeWeb(store *registry.Store, listenAddr string) {
 				case "docker", "docker-containers":
 					nodeItem = "docker-containers"
 					data.ActiveNodeItem = nodeItem
+					if r.Method == http.MethodPost {
+						if err := r.ParseForm(); err != nil {
+							data.DockerActionError = "invalid form data"
+							log.Printf("web: docker containers parse error cluster=%s node=%s err=%v", id, node.ID, err)
+						} else {
+							action := strings.TrimSpace(r.FormValue("action"))
+							data.DockerAction = action
+							log.Printf("web: docker containers action=%s cluster=%s node=%s", action, id, node.ID)
+							data.DockerActionError = handleDockerContainersAction(store, id, node.ID, action, r)
+							if data.DockerActionError != "" {
+								log.Printf("web: docker containers action failed action=%s cluster=%s node=%s err=%s", action, id, node.ID, data.DockerActionError)
+							}
+						}
+					}
 					data.DockerContainers, data.DockerError = fetchNodeDocker(store, id, node.ID)
+					if data.DockerError != "" {
+						log.Printf("web: docker containers fetch error cluster=%s node=%s err=%s", id, node.ID, data.DockerError)
+					}
 				case "docker-images":
 					nodeItem = "docker-images"
 					data.ActiveNodeItem = nodeItem
+					if r.Method == http.MethodPost {
+						if err := r.ParseForm(); err != nil {
+							data.DockerActionError = "invalid form data"
+							log.Printf("web: docker images parse error cluster=%s node=%s err=%v", id, node.ID, err)
+						} else {
+							action := strings.TrimSpace(r.FormValue("action"))
+							data.DockerAction = action
+							log.Printf("web: docker images action=%s cluster=%s node=%s", action, id, node.ID)
+							data.DockerActionError = handleDockerImagesAction(store, id, node.ID, action, r)
+							if data.DockerActionError != "" {
+								log.Printf("web: docker images action failed action=%s cluster=%s node=%s err=%s", action, id, node.ID, data.DockerActionError)
+							}
+						}
+					}
 					data.DockerImages, data.DockerError = fetchNodeDockerImages(store, id, node.ID)
+					if data.DockerError != "" {
+						log.Printf("web: docker images fetch error cluster=%s node=%s err=%s", id, node.ID, data.DockerError)
+					}
 				default:
 					http.NotFound(w, r)
 					return
@@ -342,4 +385,191 @@ func fetchNodeDockerImages(store *registry.Store, clusterID, nodeID string) ([]p
 		return nil, "invalid docker image list"
 	}
 	return items, ""
+}
+
+func handleDockerContainersAction(store *registry.Store, clusterID, nodeID, action string, r *http.Request) string {
+	if store == nil || clusterID == "" || nodeID == "" {
+		return ""
+	}
+	containerID := strings.TrimSpace(r.FormValue("container_id"))
+	if action == "create" {
+		params := protocol.DockerContainerCreateParams{
+			Image:         strings.TrimSpace(r.FormValue("image")),
+			Name:          strings.TrimSpace(r.FormValue("name")),
+			Command:       strings.TrimSpace(r.FormValue("command")),
+			Entrypoint:    strings.TrimSpace(r.FormValue("entrypoint")),
+			WorkingDir:    strings.TrimSpace(r.FormValue("working_dir")),
+			Env:           splitLines(r.FormValue("env")),
+			Ports:         splitCSV(r.FormValue("ports")),
+			PublishAll:    formValueBool(r, "publish_all"),
+			AutoRemove:    formValueBool(r, "auto_remove"),
+			RestartPolicy: strings.TrimSpace(r.FormValue("restart_policy")),
+			Start:         formValueBool(r, "start"),
+		}
+		if params.Image == "" {
+			return "image is required"
+		}
+		payload, err := json.Marshal(params)
+		if err != nil {
+			return "failed to build create payload"
+		}
+		cmd := protocol.NodeCommand{Action: "docker.container.create", Params: payload}
+		cmdBytes, err := json.Marshal(cmd)
+		if err != nil {
+			return "failed to build create command"
+		}
+		_, reply, err := tcp.SendClusterCommandWait(store, tcp.TargetRequest{
+			ClusterID: clusterID,
+			NodeID:    nodeID,
+			Scope:     tcp.TargetMasterByNode,
+		}, json.RawMessage(cmdBytes), 30*time.Second)
+		if err != nil {
+			return err.Error()
+		}
+		if reply.Status != "ok" {
+			return reply.Message
+		}
+		return ""
+	}
+	if containerID == "" {
+		return "container id is required"
+	}
+	cmdAction := ""
+	params := map[string]any{"id": containerID}
+	if action == "start" {
+		cmdAction = "docker.container.start"
+	} else if action == "stop" {
+		cmdAction = "docker.container.stop"
+		if timeout := strings.TrimSpace(r.FormValue("timeout")); timeout != "" {
+			if value, err := parsePositiveInt(timeout); err == nil {
+				params["timeout_seconds"] = value
+			}
+		}
+	} else if action == "restart" {
+		cmdAction = "docker.container.restart"
+		if timeout := strings.TrimSpace(r.FormValue("timeout")); timeout != "" {
+			if value, err := parsePositiveInt(timeout); err == nil {
+				params["timeout_seconds"] = value
+			}
+		}
+	} else if action == "remove" {
+		cmdAction = "docker.container.remove"
+		params["force"] = formValueBool(r, "force")
+		params["remove_volumes"] = formValueBool(r, "remove_volumes")
+	} else {
+		return "unknown action"
+	}
+	paramsBytes, err := json.Marshal(params)
+	if err != nil {
+		return "failed to build action payload"
+	}
+	cmd := protocol.NodeCommand{Action: cmdAction, Params: paramsBytes}
+	cmdBytes, err := json.Marshal(cmd)
+	if err != nil {
+		return "failed to build action command"
+	}
+	_, reply, err := tcp.SendClusterCommandWait(store, tcp.TargetRequest{
+		ClusterID: clusterID,
+		NodeID:    nodeID,
+		Scope:     tcp.TargetMasterByNode,
+	}, json.RawMessage(cmdBytes), 30*time.Second)
+	if err != nil {
+		return err.Error()
+	}
+	if reply.Status != "ok" {
+		return reply.Message
+	}
+	return ""
+}
+
+func handleDockerImagesAction(store *registry.Store, clusterID, nodeID, action string, r *http.Request) string {
+	if store == nil || clusterID == "" || nodeID == "" {
+		return ""
+	}
+	image := strings.TrimSpace(r.FormValue("image"))
+	if image == "" {
+		return "image is required"
+	}
+	cmdAction := ""
+	params := map[string]any{"image": image}
+	if action == "pull" {
+		cmdAction = "docker.image.pull"
+	} else if action == "remove" {
+		cmdAction = "docker.image.remove"
+		params["force"] = formValueBool(r, "force")
+		params["prune_children"] = formValueBool(r, "prune_children")
+	} else {
+		return "unknown action"
+	}
+	paramsBytes, err := json.Marshal(params)
+	if err != nil {
+		return "failed to build action payload"
+	}
+	cmd := protocol.NodeCommand{Action: cmdAction, Params: paramsBytes}
+	cmdBytes, err := json.Marshal(cmd)
+	if err != nil {
+		return "failed to build action command"
+	}
+	_, reply, err := tcp.SendClusterCommandWait(store, tcp.TargetRequest{
+		ClusterID: clusterID,
+		NodeID:    nodeID,
+		Scope:     tcp.TargetMasterByNode,
+	}, json.RawMessage(cmdBytes), 30*time.Second)
+	if err != nil {
+		return err.Error()
+	}
+	if reply.Status != "ok" {
+		return reply.Message
+	}
+	return ""
+}
+
+func formValueBool(r *http.Request, key string) bool {
+	value := strings.ToLower(strings.TrimSpace(r.FormValue(key)))
+	return value == "1" || value == "true" || value == "on" || value == "yes"
+}
+
+func splitLines(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	lines := strings.Split(raw, "\n")
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		out = append(out, line)
+	}
+	return out
+}
+
+func splitCSV(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		out = append(out, part)
+	}
+	return out
+}
+
+func parsePositiveInt(raw string) (int, error) {
+	value, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, err
+	}
+	if value < 0 {
+		return 0, errors.New("negative value")
+	}
+	return value, nil
 }

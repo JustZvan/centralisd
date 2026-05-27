@@ -117,3 +117,57 @@ type DockerImage struct {
 	Created  int64             `json:"created,omitempty"`
 	Labels   map[string]string `json:"labels,omitempty"`
 }
+
+type DockerImagePullParams struct {
+	Image string `json:"image"`
+}
+
+type DockerImageRemoveParams struct {
+	Image         string `json:"image"`
+	Force         bool   `json:"force,omitempty"`
+	PruneChildren bool   `json:"prune_children,omitempty"`
+}
+
+type DockerImageRemoveResult struct {
+	Deleted  []string `json:"deleted,omitempty"`
+	Untagged []string `json:"untagged,omitempty"`
+}
+
+type DockerContainerCreateParams struct {
+	Image         string   `json:"image"`
+	Name          string   `json:"name,omitempty"`
+	Command       string   `json:"command,omitempty"`
+	Entrypoint    string   `json:"entrypoint,omitempty"`
+	WorkingDir    string   `json:"working_dir,omitempty"`
+	Env           []string `json:"env,omitempty"`
+	Ports         []string `json:"ports,omitempty"`
+	PublishAll    bool     `json:"publish_all,omitempty"`
+	AutoRemove    bool     `json:"auto_remove,omitempty"`
+	RestartPolicy string   `json:"restart_policy,omitempty"`
+	Start         bool     `json:"start,omitempty"`
+}
+
+type DockerContainerCreateResult struct {
+	ID       string   `json:"id"`
+	Warnings []string `json:"warnings,omitempty"`
+}
+
+type DockerContainerStartParams struct {
+	ID string `json:"id"`
+}
+
+type DockerContainerStopParams struct {
+	ID             string `json:"id"`
+	TimeoutSeconds *int   `json:"timeout_seconds,omitempty"`
+}
+
+type DockerContainerRestartParams struct {
+	ID             string `json:"id"`
+	TimeoutSeconds *int   `json:"timeout_seconds,omitempty"`
+}
+
+type DockerContainerRemoveParams struct {
+	ID            string `json:"id"`
+	Force         bool   `json:"force,omitempty"`
+	RemoveVolumes bool   `json:"remove_volumes,omitempty"`
+}
