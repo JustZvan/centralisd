@@ -28,22 +28,29 @@ type viewData struct {
 	ActiveCluster string
 	ClusterOnline bool
 
-	Nodes            []registry.NodeInfo
-	VMDomains        []protocol.VMListNode
-	DockerContainers []protocol.DockerContainer
-	DockerImages     []protocol.DockerImage
-	DockerError      string
-	DockerAction     string
-	DockerActionError string
+	Nodes               []registry.NodeInfo
+	VMDomains           []protocol.VMListNode
+	NodeVMDomains       []protocol.VMDomain
+	DockerContainers    []protocol.DockerContainer
+	DockerImages        []protocol.DockerImage
+	DockerError         string
+	DockerAction        string
+	DockerActionError   string
+	LibvirtStoragePools []protocol.LibvirtStoragePool
+	LibvirtNetworks     []protocol.LibvirtNetwork
+	LibvirtError        string
+	LibvirtAction       string
+	LibvirtActionError  string
 }
 
 type templates struct {
-	home         *template.Template
-	cluster      *template.Template
-	vms          *template.Template
-	reverseProxy *template.Template
-	nodes        *template.Template
-	node         *template.Template
+	home               *template.Template
+	cluster            *template.Template
+	vms                *template.Template
+	reverseProxy       *template.Template
+	nodes              *template.Template
+	node               *template.Template
+	nodeVirtualization *template.Template
 }
 
 func parseTemplates() (*templates, error) {
@@ -83,14 +90,19 @@ func parseTemplates() (*templates, error) {
 	if err != nil {
 		return nil, err
 	}
+	nodeVirtualization, err := parsePage("page_node_virtualization.html")
+	if err != nil {
+		return nil, err
+	}
 
 	return &templates{
-		home:         home,
-		cluster:      cluster,
-		vms:          vms,
-		reverseProxy: reverseProxy,
-		nodes:        nodes,
-		node:         node,
+		home:               home,
+		cluster:            cluster,
+		vms:                vms,
+		reverseProxy:       reverseProxy,
+		nodes:              nodes,
+		node:               node,
+		nodeVirtualization: nodeVirtualization,
 	}, nil
 }
 
@@ -252,6 +264,40 @@ func ServeWeb(store *registry.Store, listenAddr string) {
 					if data.DockerError != "" {
 						log.Printf("web: docker images fetch error cluster=%s node=%s err=%s", id, node.ID, data.DockerError)
 					}
+				case "virtualization":
+					nodeItem = "virtualization"
+					data.ActiveNodeItem = nodeItem
+					tmpl = tmpls.nodeVirtualization
+					if r.Method == http.MethodPost {
+						if err := r.ParseForm(); err != nil {
+							data.LibvirtActionError = "invalid form data"
+							log.Printf("web: libvirt parse error cluster=%s node=%s err=%v", id, node.ID, err)
+						} else {
+							action := strings.TrimSpace(r.FormValue("action"))
+							data.LibvirtAction = action
+							log.Printf("web: libvirt action=%s cluster=%s node=%s", action, id, node.ID)
+							data.LibvirtActionError = handleNodeVirtualizationAction(store, id, node.ID, action, r)
+							if data.LibvirtActionError != "" {
+								log.Printf("web: libvirt action failed action=%s cluster=%s node=%s err=%s", action, id, node.ID, data.LibvirtActionError)
+							}
+						}
+					}
+					data.NodeVMDomains, data.LibvirtError = fetchNodeVMDomains(store, id, node.ID)
+					if data.LibvirtError != "" {
+						log.Printf("web: libvirt domains fetch error cluster=%s node=%s err=%s", id, node.ID, data.LibvirtError)
+					}
+					if data.LibvirtStoragePools, err = fetchNodeStoragePools(store, id, node.ID); err != nil {
+						if data.LibvirtError == "" {
+							data.LibvirtError = err.Error()
+						}
+						log.Printf("web: libvirt pools fetch error cluster=%s node=%s err=%v", id, node.ID, err)
+					}
+					if data.LibvirtNetworks, err = fetchNodeNetworks(store, id, node.ID); err != nil {
+						if data.LibvirtError == "" {
+							data.LibvirtError = err.Error()
+						}
+						log.Printf("web: libvirt networks fetch error cluster=%s node=%s err=%v", id, node.ID, err)
+					}
 				default:
 					http.NotFound(w, r)
 					return
@@ -385,6 +431,208 @@ func fetchNodeDockerImages(store *registry.Store, clusterID, nodeID string) ([]p
 		return nil, "invalid docker image list"
 	}
 	return items, ""
+}
+
+func fetchNodeVMDomains(store *registry.Store, clusterID, nodeID string) ([]protocol.VMDomain, string) {
+	items := []protocol.VMDomain{}
+	reply, err := sendNodeCommand(store, clusterID, nodeID, "libvirt.domains.list", nil, 20*time.Second)
+	if err != nil {
+		return items, err.Error()
+	}
+	if reply.Status != "ok" {
+		return items, reply.Message
+	}
+	if err := json.Unmarshal(reply.Output, &items); err != nil {
+		return nil, "invalid domain list"
+	}
+	return items, ""
+}
+
+func fetchNodeStoragePools(store *registry.Store, clusterID, nodeID string) ([]protocol.LibvirtStoragePool, error) {
+	items := []protocol.LibvirtStoragePool{}
+	reply, err := sendNodeCommand(store, clusterID, nodeID, "libvirt.storage.pools.list", nil, 20*time.Second)
+	if err != nil {
+		return nil, err
+	}
+	if reply.Status != "ok" {
+		return nil, errors.New(reply.Message)
+	}
+	if err := json.Unmarshal(reply.Output, &items); err != nil {
+		return nil, errors.New("invalid storage pool list")
+	}
+	return items, nil
+}
+
+func fetchNodeNetworks(store *registry.Store, clusterID, nodeID string) ([]protocol.LibvirtNetwork, error) {
+	items := []protocol.LibvirtNetwork{}
+	reply, err := sendNodeCommand(store, clusterID, nodeID, "libvirt.networks.list", nil, 20*time.Second)
+	if err != nil {
+		return nil, err
+	}
+	if reply.Status != "ok" {
+		return nil, errors.New(reply.Message)
+	}
+	if err := json.Unmarshal(reply.Output, &items); err != nil {
+		return nil, errors.New("invalid network list")
+	}
+	return items, nil
+}
+
+func sendNodeCommand(store *registry.Store, clusterID, nodeID, action string, params any, timeout time.Duration) (protocol.CommandReply, error) {
+	if store == nil {
+		return protocol.CommandReply{}, errors.New("nil store")
+	}
+	action = strings.TrimSpace(action)
+	if action == "" {
+		return protocol.CommandReply{}, errors.New("action is required")
+	}
+	var paramsBytes []byte
+	var err error
+	if params != nil {
+		paramsBytes, err = json.Marshal(params)
+		if err != nil {
+			return protocol.CommandReply{}, err
+		}
+	}
+	cmdBytes, err := json.Marshal(protocol.NodeCommand{Action: action, Params: paramsBytes})
+	if err != nil {
+		return protocol.CommandReply{}, err
+	}
+	_, reply, err := tcp.SendClusterCommandWait(store, tcp.TargetRequest{
+		ClusterID: clusterID,
+		NodeID:    nodeID,
+		Scope:     tcp.TargetMasterByNode,
+	}, json.RawMessage(cmdBytes), timeout)
+	if err != nil {
+		return protocol.CommandReply{}, err
+	}
+	return reply, nil
+}
+
+func handleNodeVirtualizationAction(store *registry.Store, clusterID, nodeID, action string, r *http.Request) string {
+	if store == nil || clusterID == "" || nodeID == "" {
+		return ""
+	}
+	action = strings.TrimSpace(action)
+	if action == "" {
+		return "action is required"
+	}
+	name := strings.TrimSpace(r.FormValue("vm_name"))
+	switch action {
+	case "create":
+		memoryMB := uint64(2048)
+		if raw := strings.TrimSpace(r.FormValue("memory_mb")); raw != "" {
+			value, err := parsePositiveUint64(raw)
+			if err != nil {
+				return "invalid memory value"
+			}
+			memoryMB = value
+		}
+		vcpus := uint(2)
+		if raw := strings.TrimSpace(r.FormValue("vcpus")); raw != "" {
+			value, err := parsePositiveUint64(raw)
+			if err != nil {
+				return "invalid vcpu value"
+			}
+			vcpus = uint(value)
+		}
+		diskSizeGB := uint64(20)
+		if raw := strings.TrimSpace(r.FormValue("disk_size_gb")); raw != "" {
+			value, err := parsePositiveUint64(raw)
+			if err != nil {
+				return "invalid disk size value"
+			}
+			diskSizeGB = value
+		}
+		params := protocol.LibvirtVMCreateParams{
+			Name:       name,
+			MemoryMB:   memoryMB,
+			VCPUs:      vcpus,
+			DiskPool:   strings.TrimSpace(r.FormValue("disk_pool")),
+			DiskName:   strings.TrimSpace(r.FormValue("disk_name")),
+			DiskSizeGB: diskSizeGB,
+			Network:    strings.TrimSpace(r.FormValue("network")),
+			ISOPath:    strings.TrimSpace(r.FormValue("iso_path")),
+			Autostart:  formValueBool(r, "autostart"),
+			Start:      formValueBool(r, "start"),
+		}
+		if params.Name == "" {
+			return "vm name is required"
+		}
+		reply, err := sendNodeCommand(store, clusterID, nodeID, "libvirt.domain.create", params, 90*time.Second)
+		if err != nil {
+			return err.Error()
+		}
+		if reply.Status != "ok" {
+			return reply.Message
+		}
+		return ""
+	case "start", "shutdown", "reboot", "destroy", "detach-iso":
+		if name == "" {
+			return "vm name is required"
+		}
+		command := map[string]string{
+			"start":      "libvirt.domain.start",
+			"shutdown":   "libvirt.domain.shutdown",
+			"reboot":     "libvirt.domain.reboot",
+			"destroy":    "libvirt.domain.destroy",
+			"detach-iso": "libvirt.domain.iso.detach",
+		}[action]
+		reply, err := sendNodeCommand(store, clusterID, nodeID, command, protocol.LibvirtVMActionParams{Name: name}, 45*time.Second)
+		if err != nil {
+			return err.Error()
+		}
+		if reply.Status != "ok" {
+			return reply.Message
+		}
+		return ""
+	case "autostart-enable", "autostart-disable":
+		if name == "" {
+			return "vm name is required"
+		}
+		reply, err := sendNodeCommand(store, clusterID, nodeID, "libvirt.domain.autostart", protocol.LibvirtVMSetAutostartParams{
+			Name:    name,
+			Enabled: action == "autostart-enable",
+		}, 20*time.Second)
+		if err != nil {
+			return err.Error()
+		}
+		if reply.Status != "ok" {
+			return reply.Message
+		}
+		return ""
+	case "attach-iso":
+		isoPath := strings.TrimSpace(r.FormValue("iso_path"))
+		if name == "" || isoPath == "" {
+			return "vm name and iso path are required"
+		}
+		reply, err := sendNodeCommand(store, clusterID, nodeID, "libvirt.domain.iso.attach", protocol.LibvirtVMAttachISOParams{Name: name, ISOPath: isoPath}, 30*time.Second)
+		if err != nil {
+			return err.Error()
+		}
+		if reply.Status != "ok" {
+			return reply.Message
+		}
+		return ""
+	case "delete":
+		if name == "" {
+			return "vm name is required"
+		}
+		reply, err := sendNodeCommand(store, clusterID, nodeID, "libvirt.domain.delete", protocol.LibvirtVMDeleteParams{
+			Name:          name,
+			ForceStop:     formValueBool(r, "force_stop"),
+			RemoveVolumes: formValueBool(r, "remove_volumes"),
+		}, 60*time.Second)
+		if err != nil {
+			return err.Error()
+		}
+		if reply.Status != "ok" {
+			return reply.Message
+		}
+		return ""
+	default:
+		return "unknown action"
+	}
 }
 
 func handleDockerContainersAction(store *registry.Store, clusterID, nodeID, action string, r *http.Request) string {
@@ -570,6 +818,14 @@ func parsePositiveInt(raw string) (int, error) {
 	}
 	if value < 0 {
 		return 0, errors.New("negative value")
+	}
+	return value, nil
+}
+
+func parsePositiveUint64(raw string) (uint64, error) {
+	value, err := strconv.ParseUint(raw, 10, 64)
+	if err != nil {
+		return 0, err
 	}
 	return value, nil
 }

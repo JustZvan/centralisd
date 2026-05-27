@@ -1,0 +1,214 @@
+{{define "page"}}
+<div class="page">
+  <h1>{{if .ActiveNode.Name}}{{.ActiveNode.Name}}{{else}}{{.ActiveNode.ID}}{{end}}</h1>
+
+  <p><strong>Node ID:</strong> {{.ActiveNode.ID}}</p>
+  <p><strong>IP address (local):</strong> {{.ActiveNode.IP}}</p>
+
+  <nav class="tabs" style="margin-top: 1rem">
+    <a class="tab" href="/clusters/{{.ActiveCluster}}/nodes/{{.ActiveNode.ID}}/docker">Docker</a>
+    <a class="tab active" href="/clusters/{{.ActiveCluster}}/nodes/{{.ActiveNode.ID}}/virtualization">Virtualization</a>
+  </nav>
+
+  <div class="card">
+    <div class="card-header">
+      <div>
+        <h2>Virtualization</h2>
+        <p class="muted">Manage libvirt domains, boot media, storage pools, and networks.</p>
+      </div>
+    </div>
+
+    {{if .LibvirtActionError}}
+    <div class="notice notice-error">{{.LibvirtActionError}}</div>
+    {{else if .LibvirtAction}}
+    <div class="notice notice-success">Action completed.</div>
+    {{end}}
+
+    <div class="section">
+      <h3>Create VM</h3>
+      <form method="post" class="form-grid">
+        <input type="hidden" name="action" value="create" />
+        <label>
+          <span>Name</span>
+          <input type="text" name="vm_name" placeholder="vm-web-01" required />
+        </label>
+        <label>
+          <span>Memory (MiB)</span>
+          <input type="number" name="memory_mb" min="256" value="2048" />
+        </label>
+        <label>
+          <span>vCPUs</span>
+          <input type="number" name="vcpus" min="1" value="2" />
+        </label>
+        <label>
+          <span>Disk pool</span>
+          <input type="text" name="disk_pool" placeholder="default" />
+        </label>
+        <label>
+          <span>Disk volume name</span>
+          <input type="text" name="disk_name" placeholder="vm-web-01.qcow2" />
+        </label>
+        <label>
+          <span>Disk size (GiB)</span>
+          <input type="number" name="disk_size_gb" min="1" value="20" />
+        </label>
+        <label>
+          <span>Network</span>
+          <input type="text" name="network" placeholder="default" />
+        </label>
+        <label>
+          <span>ISO path</span>
+          <input type="text" name="iso_path" placeholder="/var/lib/libvirt/images/installer.iso" />
+        </label>
+        <div class="form-row">
+          <label class="checkbox">
+            <input type="checkbox" name="autostart" /> Autostart
+          </label>
+          <label class="checkbox">
+            <input type="checkbox" name="start" checked /> Start after create
+          </label>
+        </div>
+        <div class="form-actions">
+          <button class="btn" type="submit">Create VM</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="section">
+      <h3>Virtual Machines</h3>
+      {{if .LibvirtError}}
+      <p>{{.LibvirtError}}</p>
+      {{else if .NodeVMDomains}}
+      <table>
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>State</th>
+            <th>Memory</th>
+            <th>vCPUs</th>
+            <th>Autostart</th>
+            <th>ISO</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .NodeVMDomains}}
+          <tr>
+            <td>
+              <strong>{{.Name}}</strong><br />
+              <span class="muted">{{.UUID}}</span>
+            </td>
+            <td>{{if .State}}{{.State}}{{else if .Active}}running{{else}}shutoff{{end}}</td>
+            <td>{{.MemoryMB}} / {{.MaxMemMB}} MiB</td>
+            <td>{{.VCPUs}}</td>
+            <td>{{if .Autostart}}enabled{{else}}disabled{{end}}</td>
+            <td>{{if .ISOPath}}{{.ISOPath}}{{else}}none{{end}}</td>
+            <td>
+              <form method="post" class="inline-form">
+                <input type="hidden" name="vm_name" value="{{.Name}}" />
+                <button class="btn btn-ghost" name="action" value="start" type="submit">Start</button>
+                <button class="btn btn-ghost" name="action" value="shutdown" type="submit">Shutdown</button>
+                <button class="btn btn-ghost" name="action" value="reboot" type="submit">Reboot</button>
+                <button class="btn btn-ghost" name="action" value="destroy" type="submit">Force Stop</button>
+                {{if .Autostart}}
+                <button class="btn btn-ghost" name="action" value="autostart-disable" type="submit">Disable Autostart</button>
+                {{else}}
+                <button class="btn btn-ghost" name="action" value="autostart-enable" type="submit">Enable Autostart</button>
+                {{end}}
+              </form>
+              <form method="post" class="inline-form" style="margin-top: 0.5rem">
+                <input type="hidden" name="vm_name" value="{{.Name}}" />
+                <input type="text" name="iso_path" placeholder="/path/to/installer.iso" />
+                <button class="btn btn-ghost" name="action" value="attach-iso" type="submit">Attach ISO</button>
+                <button class="btn btn-ghost" name="action" value="detach-iso" type="submit">Detach ISO</button>
+              </form>
+              <form method="post" class="inline-form" style="margin-top: 0.5rem">
+                <input type="hidden" name="vm_name" value="{{.Name}}" />
+                <label class="checkbox">
+                  <input type="checkbox" name="force_stop" /> Force stop first
+                </label>
+                <label class="checkbox">
+                  <input type="checkbox" name="remove_volumes" /> Remove volumes
+                </label>
+                <button class="btn btn-ghost" name="action" value="delete" type="submit">Delete</button>
+              </form>
+            </td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+      {{else}}
+      <p>No virtual machines found.</p>
+      {{end}}
+    </div>
+
+    <div class="section">
+      <h3>Storage Pools</h3>
+      {{if .LibvirtStoragePools}}
+      <div class="stack">
+        {{range .LibvirtStoragePools}}
+        <div class="subcard">
+          <h4>{{.Name}}</h4>
+          <p class="muted">{{if .Active}}active{{else}}inactive{{end}} | capacity {{.Capacity}} | available {{.Available}}</p>
+          {{if .Volumes}}
+          <table>
+            <thead>
+              <tr>
+                <th>Volume</th>
+                <th>Path</th>
+                <th>Format</th>
+                <th>Capacity</th>
+              </tr>
+            </thead>
+            <tbody>
+              {{range .Volumes}}
+              <tr>
+                <td>{{.Name}}</td>
+                <td>{{.Path}}</td>
+                <td>{{.Format}}</td>
+                <td>{{.Capacity}}</td>
+              </tr>
+              {{end}}
+            </tbody>
+          </table>
+          {{else}}
+          <p>No volumes found.</p>
+          {{end}}
+        </div>
+        {{end}}
+      </div>
+      {{else}}
+      <p>No storage pools found.</p>
+      {{end}}
+    </div>
+
+    <div class="section">
+      <h3>Networks</h3>
+      {{if .LibvirtNetworks}}
+      <table>
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>State</th>
+            <th>Persistent</th>
+            <th>Autostart</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .LibvirtNetworks}}
+          <tr>
+            <td>{{.Name}}</td>
+            <td>{{if .Active}}active{{else}}inactive{{end}}</td>
+            <td>{{if .Persistent}}yes{{else}}no{{end}}</td>
+            <td>{{if .Autostart}}yes{{else}}no{{end}}</td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+      {{else}}
+      <p>No networks found.</p>
+      {{end}}
+    </div>
+  </div>
+</div>
+{{end}}

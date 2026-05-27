@@ -238,6 +238,22 @@ button {
   margin-bottom: 0.75rem;
 }
 
+.section h4 {
+  font-size: 0.95rem;
+  margin-bottom: 0.5rem;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.subcard {
+  border: 1px solid var(--fg);
+  padding: 1rem;
+}
+
 .form-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));

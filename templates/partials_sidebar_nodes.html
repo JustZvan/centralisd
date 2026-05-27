@@ -61,6 +61,12 @@
     >
       <span class="name">Docker Images</span>
     </a>
+    <a
+      class="sidebar-link sidebar-sublink {{if eq $.ActiveNodeItem "virtualization"}}active{{end}}"
+      href="/clusters/{{.}}/nodes/{{$.ActiveNode.ID}}/virtualization"
+    >
+      <span class="name">Virtualization</span>
+    </a>
     {{end}}
     {{end}}
     {{end}}

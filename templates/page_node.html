@@ -5,6 +5,11 @@
   <p><strong>Node ID:</strong> {{.ActiveNode.ID}}</p>
   <p><strong>IP address (local):</strong> {{.ActiveNode.IP}}</p>
 
+  <nav class="tabs" style="margin-top: 1rem">
+    <a class="tab active" href="/clusters/{{.ActiveCluster}}/nodes/{{.ActiveNode.ID}}/docker">Docker</a>
+    <a class="tab" href="/clusters/{{.ActiveCluster}}/nodes/{{.ActiveNode.ID}}/virtualization">Virtualization</a>
+  </nav>
+
   <div class="card">
     <div class="card-header">
       <div>

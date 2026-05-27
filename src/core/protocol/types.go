@@ -85,10 +85,17 @@ type NodeCommand struct {
 }
 
 type VMDomain struct {
-	ID     uint32 `json:"id"`
-	UUID   string `json:"uuid"`
-	Name   string `json:"name"`
-	Active bool   `json:"active"`
+	ID         uint32 `json:"id"`
+	UUID       string `json:"uuid"`
+	Name       string `json:"name"`
+	Active     bool   `json:"active"`
+	Persistent bool   `json:"persistent,omitempty"`
+	Autostart  bool   `json:"autostart,omitempty"`
+	State      string `json:"state,omitempty"`
+	MaxMemMB   uint64 `json:"max_mem_mb,omitempty"`
+	MemoryMB   uint64 `json:"memory_mb,omitempty"`
+	VCPUs      uint   `json:"vcpus,omitempty"`
+	ISOPath    string `json:"iso_path,omitempty"`
 }
 
 type VMListNode struct {
@@ -99,6 +106,75 @@ type VMListNode struct {
 
 type VMListAggregate struct {
 	Nodes []VMListNode `json:"nodes"`
+}
+
+type LibvirtStorageVolume struct {
+	Name       string `json:"name"`
+	Key        string `json:"key,omitempty"`
+	Path       string `json:"path,omitempty"`
+	Format     string `json:"format,omitempty"`
+	Capacity   uint64 `json:"capacity,omitempty"`
+	Allocation uint64 `json:"allocation,omitempty"`
+}
+
+type LibvirtStoragePool struct {
+	Name       string                 `json:"name"`
+	UUID       string                 `json:"uuid,omitempty"`
+	Active     bool                   `json:"active,omitempty"`
+	Persistent bool                   `json:"persistent,omitempty"`
+	Autostart  bool                   `json:"autostart,omitempty"`
+	Capacity   uint64                 `json:"capacity,omitempty"`
+	Allocation uint64                 `json:"allocation,omitempty"`
+	Available  uint64                 `json:"available,omitempty"`
+	Volumes    []LibvirtStorageVolume `json:"volumes,omitempty"`
+}
+
+type LibvirtNetwork struct {
+	Name       string `json:"name"`
+	UUID       string `json:"uuid,omitempty"`
+	Active     bool   `json:"active,omitempty"`
+	Persistent bool   `json:"persistent,omitempty"`
+	Autostart  bool   `json:"autostart,omitempty"`
+}
+
+type LibvirtVMActionParams struct {
+	Name string `json:"name"`
+}
+
+type LibvirtVMCreateParams struct {
+	Name       string `json:"name"`
+	MemoryMB   uint64 `json:"memory_mb"`
+	VCPUs      uint   `json:"vcpus"`
+	DiskPool   string `json:"disk_pool"`
+	DiskName   string `json:"disk_name,omitempty"`
+	DiskSizeGB uint64 `json:"disk_size_gb"`
+	Network    string `json:"network,omitempty"`
+	ISOPath    string `json:"iso_path,omitempty"`
+	Autostart  bool   `json:"autostart,omitempty"`
+	Start      bool   `json:"start,omitempty"`
+}
+
+type LibvirtVMCreateResult struct {
+	Name       string `json:"name"`
+	UUID       string `json:"uuid,omitempty"`
+	DiskVolume string `json:"disk_volume,omitempty"`
+	DiskPath   string `json:"disk_path,omitempty"`
+}
+
+type LibvirtVMSetAutostartParams struct {
+	Name    string `json:"name"`
+	Enabled bool   `json:"enabled"`
+}
+
+type LibvirtVMAttachISOParams struct {
+	Name    string `json:"name"`
+	ISOPath string `json:"iso_path"`
+}
+
+type LibvirtVMDeleteParams struct {
+	Name          string `json:"name"`
+	ForceStop     bool   `json:"force_stop,omitempty"`
+	RemoveVolumes bool   `json:"remove_volumes,omitempty"`
 }
 
 type DockerContainer struct {

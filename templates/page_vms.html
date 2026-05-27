@@ -5,6 +5,7 @@
     {{range .VMDomains}}
       <div class="card">
         <h2>Node {{.NodeID}}</h2>
+        <p><a href="/clusters/{{$.ActiveCluster}}/nodes/{{.NodeID}}/virtualization">Open virtualization manager</a></p>
         {{if .Error}}
           <p>{{.Error}}</p>
         {{else if .Domains}}
