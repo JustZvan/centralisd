@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"centralisd/src/core/config"
 	"centralisd/src/core/protocol"
+	"centralisd/src/slave/docker"
 	"centralisd/src/slave/firewall"
 	"centralisd/src/slave/hardware"
 	"centralisd/src/slave/libvirt"
@@ -238,6 +239,16 @@ func Connect(addr string, cfg config.Config) {
 					active, _ := d.IsActive()
 					items = append(items, protocol.VMDomain{ID: uint32(id), UUID: uuid, Name: name, Active: active})
 					_ = d.Free()
+				}
+				payload, _ := json.Marshal(items)
+				reply, _ := protocol.NewReply(string(protocol.PacketNodeCommandReply), packet.ID, protocol.CommandReply{Status: "ok", Output: payload})
+				_ = protocol.WritePacket(writer, reply)
+			case "docker.containers.list":
+				items, err := docker.GetContainers()
+				if err != nil {
+					reply, _ := protocol.NewReply(string(protocol.PacketNodeCommandReply), packet.ID, protocol.CommandReply{Status: "error", Message: err.Error()})
+					_ = protocol.WritePacket(writer, reply)
+					continue
 				}
 				payload, _ := json.Marshal(items)
 				reply, _ := protocol.NewReply(string(protocol.PacketNodeCommandReply), packet.ID, protocol.CommandReply{Status: "ok", Output: payload})

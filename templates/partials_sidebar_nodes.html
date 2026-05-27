@@ -42,6 +42,20 @@
     >
       <span class="name">Nodes</span>
     </a>
+    {{if and (eq $.ActiveClusterItem "nodes") $.ActiveNode.ID}}
+    <a
+      class="sidebar-link sidebar-sublink active"
+      href="/clusters/{{.}}/nodes/{{$.ActiveNode.ID}}"
+    >
+      <span class="name">{{if $.ActiveNode.Name}}{{$.ActiveNode.Name}}{{else}}{{$.ActiveNode.ID}}{{end}}</span>
+    </a>
+    <a
+      class="sidebar-link sidebar-sublink {{if eq $.ActiveNodeItem "docker"}}active{{end}}"
+      href="/clusters/{{.}}/nodes/{{$.ActiveNode.ID}}/docker"
+    >
+      <span class="name">Docker</span>
+    </a>
+    {{end}}
     {{end}}
     {{end}}
   </div>

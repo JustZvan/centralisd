@@ -5,66 +5,66 @@ import "encoding/json"
 type PacketType string
 
 const (
-    PacketError             PacketType = "error"
-    PacketAuthHello         PacketType = "auth.hello"
-    PacketAuthChallenge     PacketType = "auth.challenge"
-    PacketAuthProof         PacketType = "auth.proof"
-    PacketAuthOK            PacketType = "auth.ok"
-    PacketHeartbeat         PacketType = "heartbeat"
-    PacketHeartbeatReply    PacketType = "heartbeat.reply"
-    PacketNodeCommand       PacketType = "node.command"
-    PacketNodeCommandReply  PacketType = "node.command.reply"
-    PacketOrchCommand       PacketType = "orchestrator.command"
-    PacketOrchCommandReply  PacketType = "orchestrator.command.reply"
-    PacketMasterRegister    PacketType = "master.register"
-    PacketMasterHeartbeat   PacketType = "master.heartbeat"
+	PacketError            PacketType = "error"
+	PacketAuthHello        PacketType = "auth.hello"
+	PacketAuthChallenge    PacketType = "auth.challenge"
+	PacketAuthProof        PacketType = "auth.proof"
+	PacketAuthOK           PacketType = "auth.ok"
+	PacketHeartbeat        PacketType = "heartbeat"
+	PacketHeartbeatReply   PacketType = "heartbeat.reply"
+	PacketNodeCommand      PacketType = "node.command"
+	PacketNodeCommandReply PacketType = "node.command.reply"
+	PacketOrchCommand      PacketType = "orchestrator.command"
+	PacketOrchCommandReply PacketType = "orchestrator.command.reply"
+	PacketMasterRegister   PacketType = "master.register"
+	PacketMasterHeartbeat  PacketType = "master.heartbeat"
 )
 
 type AuthHello struct {
-    ID        string `json:"id"`
-    PubKey    string `json:"pubkey"`
-    Role      string `json:"role"`
-    Name      string `json:"name,omitempty"`
-    Cluster   string `json:"cluster,omitempty"`
-    Advertise string `json:"advertise,omitempty"`
+	ID        string `json:"id"`
+	PubKey    string `json:"pubkey"`
+	Role      string `json:"role"`
+	Name      string `json:"name,omitempty"`
+	Cluster   string `json:"cluster,omitempty"`
+	Advertise string `json:"advertise,omitempty"`
 }
 
 type AuthChallenge struct {
-    Challenge string `json:"challenge"`
+	Challenge string `json:"challenge"`
 }
 
 type AuthProof struct {
-    Signature string `json:"signature"`
+	Signature string `json:"signature"`
 }
 
 type MasterInfo struct {
-    ID        string     `json:"id"`
-    Name      string     `json:"name"`
-    Cluster   string     `json:"cluster"`
-    Advertise string     `json:"advertise"`
-    PubKey    string     `json:"pubKey"`
-    Nodes     []NodeInfo `json:"nodes"`
+	ID        string     `json:"id"`
+	Name      string     `json:"name"`
+	Cluster   string     `json:"cluster"`
+	Advertise string     `json:"advertise"`
+	PubKey    string     `json:"pubKey"`
+	Nodes     []NodeInfo `json:"nodes"`
 }
 
 type NodeInfo struct {
-    ID   string `json:"id"`
-    Name string `json:"name"`
-    IP   string `json:"ip"`
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	IP   string `json:"ip"`
 }
 
 type Heartbeat struct {
-    Usage    HeartbeatUsage    `json:"usage"`
-    Hardware HeartbeatHardware `json:"hardware"`
+	Usage    HeartbeatUsage    `json:"usage"`
+	Hardware HeartbeatHardware `json:"hardware"`
 }
 
 type HeartbeatUsage struct {
-    CPUPercent float64 `json:"cpu_percent"`
-    RAMPercent float64 `json:"ram_percent"`
+	CPUPercent float64 `json:"cpu_percent"`
+	RAMPercent float64 `json:"ram_percent"`
 }
 
 type HeartbeatHardware struct {
-    CPUCores int    `json:"cpu_cores"`
-    RAMBytes uint64 `json:"ram_bytes"`
+	CPUCores int    `json:"cpu_cores"`
+	RAMBytes uint64 `json:"ram_bytes"`
 }
 
 type OrchestratorCommand struct {
@@ -99,4 +99,13 @@ type VMListNode struct {
 
 type VMListAggregate struct {
 	Nodes []VMListNode `json:"nodes"`
+}
+
+type DockerContainer struct {
+	ID      string   `json:"id"`
+	Image   string   `json:"image"`
+	Names   []string `json:"names,omitempty"`
+	State   string   `json:"state,omitempty"`
+	Status  string   `json:"status,omitempty"`
+	Created int64    `json:"created,omitempty"`
 }

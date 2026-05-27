@@ -18,14 +18,18 @@ import (
 type viewData struct {
 	Title             string
 	ActiveClusterItem string
+	ActiveNode        registry.NodeInfo
+	ActiveNodeItem    string
 
 	NodesOpen     bool
 	Clusters      []string
 	ActiveCluster string
 	ClusterOnline bool
 
-	Nodes     []registry.NodeInfo
-	VMDomains []protocol.VMListNode
+	Nodes            []registry.NodeInfo
+	VMDomains        []protocol.VMListNode
+	DockerContainers []protocol.DockerContainer
+	DockerError      string
 }
 
 type templates struct {
@@ -34,6 +38,7 @@ type templates struct {
 	vms          *template.Template
 	reverseProxy *template.Template
 	nodes        *template.Template
+	node         *template.Template
 }
 
 func parseTemplates() (*templates, error) {
@@ -69,6 +74,10 @@ func parseTemplates() (*templates, error) {
 	if err != nil {
 		return nil, err
 	}
+	node, err := parsePage("page_node.html")
+	if err != nil {
+		return nil, err
+	}
 
 	return &templates{
 		home:         home,
@@ -76,6 +85,7 @@ func parseTemplates() (*templates, error) {
 		vms:          vms,
 		reverseProxy: reverseProxy,
 		nodes:        nodes,
+		node:         node,
 	}, nil
 }
 
@@ -118,7 +128,7 @@ func ServeWeb(store *registry.Store, listenAddr string) {
 		}
 
 		parts := strings.Split(rest, "/")
-		if len(parts) < 1 || len(parts) > 2 {
+		if len(parts) < 1 || len(parts) > 4 {
 			http.NotFound(w, r)
 			return
 		}
@@ -133,6 +143,7 @@ func ServeWeb(store *registry.Store, listenAddr string) {
 		}
 
 		clusterItem := ""
+		nodeItem := ""
 		title := "Cluster: " + id
 		tmpl := tmpls.cluster
 		if len(parts) == 2 {
@@ -162,8 +173,35 @@ func ServeWeb(store *registry.Store, listenAddr string) {
 			NodesOpen:         true,
 			ActiveCluster:     id,
 			ActiveClusterItem: clusterItem,
+			ActiveNodeItem:    nodeItem,
 			ClusterOnline:     store.IsClusterOnline(id),
 			Nodes:             nodes,
+		}
+
+		if len(parts) >= 3 {
+			if parts[1] != "nodes" {
+				http.NotFound(w, r)
+				return
+			}
+			node, ok := findNode(nodes, parts[2])
+			if !ok {
+				http.NotFound(w, r)
+				return
+			}
+			clusterItem = "nodes"
+			data.ActiveClusterItem = clusterItem
+			data.ActiveNode = node
+			tmpl = tmpls.node
+			title = "Node: " + nodeLabel(node)
+			data.Title = title
+			if len(parts) == 3 || (len(parts) == 4 && parts[3] == "docker") {
+				nodeItem = "docker"
+				data.ActiveNodeItem = nodeItem
+				data.DockerContainers, data.DockerError = fetchNodeDocker(store, id, node.ID)
+			} else {
+				http.NotFound(w, r)
+				return
+			}
 		}
 
 		if clusterItem == "vms" {
@@ -177,6 +215,26 @@ func ServeWeb(store *registry.Store, listenAddr string) {
 		listenAddr = "localhost:8090"
 	}
 	http.ListenAndServe(listenAddr, app)
+}
+
+func findNode(nodes []registry.NodeInfo, raw string) (registry.NodeInfo, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return registry.NodeInfo{}, false
+	}
+	for _, node := range nodes {
+		if node.ID == raw {
+			return node, true
+		}
+	}
+	return registry.NodeInfo{}, false
+}
+
+func nodeLabel(node registry.NodeInfo) string {
+	if strings.TrimSpace(node.Name) != "" {
+		return node.Name
+	}
+	return node.ID
 }
 
 func fetchVMDomains(store *registry.Store, clusterID string) []protocol.VMListNode {
@@ -215,4 +273,46 @@ func fetchVMDomains(store *registry.Store, clusterID string) []protocol.VMListNo
 		results = append(results, aggregate.Nodes...)
 	}
 	return results
+}
+
+func fetchNodeDocker(store *registry.Store, clusterID, nodeID string) ([]protocol.DockerContainer, string) {
+	if store == nil || clusterID == "" || nodeID == "" {
+		return nil, ""
+	}
+	storeMasters := store.MastersForCluster(clusterID)
+	if len(storeMasters) == 0 {
+		return nil, "master not connected"
+	}
+	cmd := protocol.NodeCommand{Action: "docker.containers.list"}
+	cmdBytes, err := json.Marshal(cmd)
+	if err != nil {
+		return nil, "failed to build docker command"
+	}
+	for _, master := range storeMasters {
+		if master.ID == "" || !masterHasNode(master, nodeID) {
+			continue
+		}
+		reply, err := tcp.SendCommandWait(master.ID, nodeID, json.RawMessage(cmdBytes), 10*time.Second)
+		if err != nil {
+			return nil, err.Error()
+		}
+		if reply.Status != "ok" {
+			return nil, reply.Message
+		}
+		items := []protocol.DockerContainer{}
+		if err := json.Unmarshal(reply.Output, &items); err != nil {
+			return nil, "invalid docker container list"
+		}
+		return items, ""
+	}
+	return nil, "node not connected through any master"
+}
+
+func masterHasNode(master registry.MasterInfo, nodeID string) bool {
+	for _, node := range master.Nodes {
+		if node.ID == nodeID {
+			return true
+		}
+	}
+	return false
 }

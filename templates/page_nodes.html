@@ -21,11 +21,13 @@
       </tr>
       {{end}} {{range .Nodes}}
       <tr>
-        <td>{{.Name}}</td>
+        <td>
+          <a href="/clusters/{{$.ActiveCluster}}/nodes/{{.ID}}">{{if .Name}}{{.Name}}{{else}}{{.ID}}{{end}}</a>
+        </td>
         <td>{{.IP}}</td>
         <td>Online</td>
         <td>
-          <a href="#" aria-disabled="true">Manage</a>
+          <a href="/clusters/{{$.ActiveCluster}}/nodes/{{.ID}}">Manage</a>
         </td>
       </tr>
       {{end}}
