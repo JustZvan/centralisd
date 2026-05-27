@@ -29,6 +29,7 @@ type viewData struct {
 	Nodes            []registry.NodeInfo
 	VMDomains        []protocol.VMListNode
 	DockerContainers []protocol.DockerContainer
+	DockerImages     []protocol.DockerImage
 	DockerError      string
 }
 
@@ -194,10 +195,24 @@ func ServeWeb(store *registry.Store, listenAddr string) {
 			tmpl = tmpls.node
 			title = "Node: " + nodeLabel(node)
 			data.Title = title
-			if len(parts) == 3 || (len(parts) == 4 && parts[3] == "docker") {
-				nodeItem = "docker"
-				data.ActiveNodeItem = nodeItem
-				data.DockerContainers, data.DockerError = fetchNodeDocker(store, id, node.ID)
+			if len(parts) == 3 || len(parts) == 4 {
+				sub := "docker"
+				if len(parts) == 4 {
+					sub = parts[3]
+				}
+				switch sub {
+				case "docker", "docker-containers":
+					nodeItem = "docker-containers"
+					data.ActiveNodeItem = nodeItem
+					data.DockerContainers, data.DockerError = fetchNodeDocker(store, id, node.ID)
+				case "docker-images":
+					nodeItem = "docker-images"
+					data.ActiveNodeItem = nodeItem
+					data.DockerImages, data.DockerError = fetchNodeDockerImages(store, id, node.ID)
+				default:
+					http.NotFound(w, r)
+					return
+				}
 			} else {
 				http.NotFound(w, r)
 				return
@@ -279,40 +294,52 @@ func fetchNodeDocker(store *registry.Store, clusterID, nodeID string) ([]protoco
 	if store == nil || clusterID == "" || nodeID == "" {
 		return nil, ""
 	}
-	storeMasters := store.MastersForCluster(clusterID)
-	if len(storeMasters) == 0 {
-		return nil, "master not connected"
-	}
 	cmd := protocol.NodeCommand{Action: "docker.containers.list"}
 	cmdBytes, err := json.Marshal(cmd)
 	if err != nil {
 		return nil, "failed to build docker command"
 	}
-	for _, master := range storeMasters {
-		if master.ID == "" || !masterHasNode(master, nodeID) {
-			continue
-		}
-		reply, err := tcp.SendCommandWait(master.ID, nodeID, json.RawMessage(cmdBytes), 10*time.Second)
-		if err != nil {
-			return nil, err.Error()
-		}
-		if reply.Status != "ok" {
-			return nil, reply.Message
-		}
-		items := []protocol.DockerContainer{}
-		if err := json.Unmarshal(reply.Output, &items); err != nil {
-			return nil, "invalid docker container list"
-		}
-		return items, ""
+	_, reply, err := tcp.SendClusterCommandWait(store, tcp.TargetRequest{
+		ClusterID: clusterID,
+		NodeID:    nodeID,
+		Scope:     tcp.TargetMasterByNode,
+	}, json.RawMessage(cmdBytes), 10*time.Second)
+	if err != nil {
+		return nil, err.Error()
 	}
-	return nil, "node not connected through any master"
+	if reply.Status != "ok" {
+		return nil, reply.Message
+	}
+	items := []protocol.DockerContainer{}
+	if err := json.Unmarshal(reply.Output, &items); err != nil {
+		return nil, "invalid docker container list"
+	}
+	return items, ""
 }
 
-func masterHasNode(master registry.MasterInfo, nodeID string) bool {
-	for _, node := range master.Nodes {
-		if node.ID == nodeID {
-			return true
-		}
+func fetchNodeDockerImages(store *registry.Store, clusterID, nodeID string) ([]protocol.DockerImage, string) {
+	if store == nil || clusterID == "" || nodeID == "" {
+		return nil, ""
 	}
-	return false
+	cmd := protocol.NodeCommand{Action: "docker.images.list"}
+	cmdBytes, err := json.Marshal(cmd)
+	if err != nil {
+		return nil, "failed to build docker image command"
+	}
+	_, reply, err := tcp.SendClusterCommandWait(store, tcp.TargetRequest{
+		ClusterID: clusterID,
+		NodeID:    nodeID,
+		Scope:     tcp.TargetMasterByNode,
+	}, json.RawMessage(cmdBytes), 10*time.Second)
+	if err != nil {
+		return nil, err.Error()
+	}
+	if reply.Status != "ok" {
+		return nil, reply.Message
+	}
+	items := []protocol.DockerImage{}
+	if err := json.Unmarshal(reply.Output, &items); err != nil {
+		return nil, "invalid docker image list"
+	}
+	return items, ""
 }

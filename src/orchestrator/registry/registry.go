@@ -170,3 +170,15 @@ func (s *Store) MastersForCluster(clusterID string) []MasterInfo {
 	}
 	return out
 }
+
+func MasterHasNode(master MasterInfo, nodeID string) bool {
+	if nodeID == "" {
+		return false
+	}
+	for _, node := range master.Nodes {
+		if node.ID == nodeID {
+			return true
+		}
+	}
+	return false
+}

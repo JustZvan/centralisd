@@ -5,12 +5,42 @@
   <p><strong>Node ID:</strong> {{.ActiveNode.ID}}</p>
   <p><strong>IP address (local):</strong> {{.ActiveNode.IP}}</p>
 
-  <nav style="display: flex; gap: 1rem; margin: 1.5rem 0">
-    <a href="/clusters/{{.ActiveCluster}}/nodes/{{.ActiveNode.ID}}/docker">Docker</a>
-  </nav>
-
   <div class="card">
-    <h2>Docker</h2>
+    <nav style="display: flex; gap: 1rem; margin-bottom: 1.5rem">
+      <a href="/clusters/{{.ActiveCluster}}/nodes/{{.ActiveNode.ID}}/docker">Containers</a>
+      <a href="/clusters/{{.ActiveCluster}}/nodes/{{.ActiveNode.ID}}/docker-images">Images</a>
+    </nav>
+
+    {{if eq .ActiveNodeItem "docker-images"}}
+    <h2>Docker Images</h2>
+    {{if .DockerError}}
+    <p>{{.DockerError}}</p>
+    {{else if .DockerImages}}
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Tags</th>
+          <th>Size</th>
+          <th>Created</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .DockerImages}}
+        <tr>
+          <td>{{.ID}}</td>
+          <td>{{range $index, $tag := .RepoTags}}{{if $index}}, {{end}}{{$tag}}{{end}}</td>
+          <td>{{.Size}}</td>
+          <td>{{.Created}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+    {{else}}
+    <p>No Docker images found.</p>
+    {{end}}
+    {{else}}
+    <h2>Docker Containers</h2>
     {{if .DockerError}}
     <p>{{.DockerError}}</p>
     {{else if .DockerContainers}}
@@ -38,6 +68,7 @@
     </table>
     {{else}}
     <p>No Docker containers found.</p>
+    {{end}}
     {{end}}
   </div>
 </div>

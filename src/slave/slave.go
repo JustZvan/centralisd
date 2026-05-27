@@ -4,14 +4,12 @@ import (
 	"bufio"
 	"centralisd/src/core/config"
 	"centralisd/src/core/protocol"
-	"centralisd/src/slave/docker"
 	"centralisd/src/slave/firewall"
-	"centralisd/src/slave/hardware"
+	"centralisd/src/slave/handlers"
 	"centralisd/src/slave/libvirt"
 	"crypto/ed25519"
 	"crypto/x509"
 	"encoding/base64"
-	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"log"
@@ -184,85 +182,15 @@ func Connect(addr string, cfg config.Config) {
 			log.Printf("slave: read packet: %v", err)
 			return
 		}
-		switch packet.Type {
-		case string(protocol.PacketHeartbeat):
-			log.Printf("slave: heartbeat")
-			hw := hardware.GetHardwareInfo()
-			heartbeat := protocol.Heartbeat{
-				Usage: protocol.HeartbeatUsage{
-					CPUPercent: hw.CPU,
-					RAMPercent: hw.RAM.UsedPercent,
-				},
-				Hardware: protocol.HeartbeatHardware{
-					CPUCores: int(hw.CPUCores),
-					RAMBytes: hw.RAM.Total,
-				},
-			}
-			reply, err := protocol.NewReply(string(protocol.PacketHeartbeatReply), packet.ID, heartbeat)
-			if err != nil {
-				log.Printf("slave: heartbeat reply: %v", err)
-				return
-			}
-			if err := protocol.WritePacket(writer, reply); err != nil {
-				log.Printf("slave: heartbeat send: %v", err)
-				return
-			}
-			continue
-		case string(protocol.PacketNodeCommand):
-			cmd := protocol.NodeCommand{}
-			if err := protocol.DecodePayload(packet, &cmd); err != nil {
-				log.Printf("slave: invalid command payload")
-				reply, _ := protocol.NewReply(string(protocol.PacketNodeCommandReply), packet.ID, protocol.CommandReply{Status: "error", Message: "invalid command"})
-				_ = protocol.WritePacket(writer, reply)
-				continue
-			}
-			log.Printf("slave: command action=%s", cmd.Action)
-			switch cmd.Action {
-			case "libvirt.domains.list":
-				qemu, err := libvirt.GetQEMU()
-				if err != nil {
-					reply, _ := protocol.NewReply(string(protocol.PacketNodeCommandReply), packet.ID, protocol.CommandReply{Status: "error", Message: err.Error()})
-					_ = protocol.WritePacket(writer, reply)
-					continue
-				}
-				domains, err := libvirt.GetDomains(qemu)
-				if err != nil {
-					reply, _ := protocol.NewReply(string(protocol.PacketNodeCommandReply), packet.ID, protocol.CommandReply{Status: "error", Message: err.Error()})
-					_ = protocol.WritePacket(writer, reply)
-					continue
-				}
-				items := make([]protocol.VMDomain, 0, len(domains))
-				for _, d := range domains {
-					name, _ := d.GetName()
-					uuid, _ := d.GetUUIDString()
-					id, _ := d.GetID()
-					active, _ := d.IsActive()
-					items = append(items, protocol.VMDomain{ID: uint32(id), UUID: uuid, Name: name, Active: active})
-					_ = d.Free()
-				}
-				payload, _ := json.Marshal(items)
-				reply, _ := protocol.NewReply(string(protocol.PacketNodeCommandReply), packet.ID, protocol.CommandReply{Status: "ok", Output: payload})
-				_ = protocol.WritePacket(writer, reply)
-			case "docker.containers.list":
-				items, err := docker.GetContainers()
-				if err != nil {
-					reply, _ := protocol.NewReply(string(protocol.PacketNodeCommandReply), packet.ID, protocol.CommandReply{Status: "error", Message: err.Error()})
-					_ = protocol.WritePacket(writer, reply)
-					continue
-				}
-				payload, _ := json.Marshal(items)
-				reply, _ := protocol.NewReply(string(protocol.PacketNodeCommandReply), packet.ID, protocol.CommandReply{Status: "ok", Output: payload})
-				_ = protocol.WritePacket(writer, reply)
-			case "noop":
-				reply, _ := protocol.NewReply(string(protocol.PacketNodeCommandReply), packet.ID, protocol.CommandReply{Status: "ok"})
-				_ = protocol.WritePacket(writer, reply)
-			default:
-				log.Printf("slave: unknown command action=%s", cmd.Action)
-				reply, _ := protocol.NewReply(string(protocol.PacketNodeCommandReply), packet.ID, protocol.CommandReply{Status: "error", Message: "unknown action"})
-				_ = protocol.WritePacket(writer, reply)
-			}
-		default:
+		handler, ok := handlers.PacketHandlers[packet.Type]
+		if !ok {
 			log.Printf("slave: unexpected packet type: %s", packet.Type)
+			continue
+		}
+
+		if err := handler(writer, packet); err != nil {
+			log.Printf("slave: %s handler: %v", packet.Type, err)
+			return
 		}
 	}
 }

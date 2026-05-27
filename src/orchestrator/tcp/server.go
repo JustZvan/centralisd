@@ -8,6 +8,7 @@ import (
 	"errors"
 	"log"
 	"net"
+	"strings"
 	"sync"
 	"time"
 )
@@ -171,6 +172,62 @@ func SendCommandWait(masterID, nodeID string, command json.RawMessage, timeout t
 
 func SendMasterCommandWait(masterID string, command json.RawMessage, timeout time.Duration) (protocol.CommandReply, error) {
 	return sendCommandWait(masterID, protocol.OrchestratorCommand{Command: command}, timeout)
+}
+
+type TargetScope int
+
+const (
+	TargetAnyMaster TargetScope = iota
+	TargetMasterByNode
+)
+
+type TargetRequest struct {
+	ClusterID string
+	NodeID    string
+	Scope     TargetScope
+}
+
+type TargetResult struct {
+	MasterID string
+}
+
+func SendClusterCommandWait(store *registry.Store, req TargetRequest, command json.RawMessage, timeout time.Duration) (TargetResult, protocol.CommandReply, error) {
+	if store == nil {
+		return TargetResult{}, protocol.CommandReply{}, errors.New("nil store")
+	}
+	req.ClusterID = strings.TrimSpace(req.ClusterID)
+	req.NodeID = strings.TrimSpace(req.NodeID)
+	if req.ClusterID == "" {
+		return TargetResult{}, protocol.CommandReply{}, errors.New("cluster id is empty")
+	}
+	masters := store.MastersForCluster(req.ClusterID)
+	if len(masters) == 0 {
+		return TargetResult{}, protocol.CommandReply{}, errors.New("master not connected")
+	}
+	for _, master := range masters {
+		if master.ID == "" {
+			continue
+		}
+		switch req.Scope {
+		case TargetMasterByNode:
+			if req.NodeID == "" || !registry.MasterHasNode(master, req.NodeID) {
+				continue
+			}
+		case TargetAnyMaster:
+			// no-op
+		default:
+			return TargetResult{}, protocol.CommandReply{}, errors.New("unknown target scope")
+		}
+		reply, err := sendCommandWait(master.ID, protocol.OrchestratorCommand{NodeID: req.NodeID, Command: command}, timeout)
+		if err != nil {
+			return TargetResult{}, protocol.CommandReply{}, err
+		}
+		return TargetResult{MasterID: master.ID}, reply, nil
+	}
+	if req.Scope == TargetMasterByNode {
+		return TargetResult{}, protocol.CommandReply{}, errors.New("node not connected through any master")
+	}
+	return TargetResult{}, protocol.CommandReply{}, errors.New("no eligible master connected")
 }
 
 func SendCommand(masterID, nodeID string, command json.RawMessage) error {

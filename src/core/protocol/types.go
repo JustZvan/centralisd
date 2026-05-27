@@ -109,3 +109,11 @@ type DockerContainer struct {
 	Status  string   `json:"status,omitempty"`
 	Created int64    `json:"created,omitempty"`
 }
+
+type DockerImage struct {
+	ID       string            `json:"id"`
+	RepoTags []string          `json:"repo_tags,omitempty"`
+	Size     int64             `json:"size,omitempty"`
+	Created  int64             `json:"created,omitempty"`
+	Labels   map[string]string `json:"labels,omitempty"`
+}

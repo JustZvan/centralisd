@@ -50,10 +50,16 @@
       <span class="name">{{if $.ActiveNode.Name}}{{$.ActiveNode.Name}}{{else}}{{$.ActiveNode.ID}}{{end}}</span>
     </a>
     <a
-      class="sidebar-link sidebar-sublink {{if eq $.ActiveNodeItem "docker"}}active{{end}}"
+      class="sidebar-link sidebar-sublink {{if eq $.ActiveNodeItem "docker-containers"}}active{{end}}"
       href="/clusters/{{.}}/nodes/{{$.ActiveNode.ID}}/docker"
     >
-      <span class="name">Docker</span>
+      <span class="name">Docker Containers</span>
+    </a>
+    <a
+      class="sidebar-link sidebar-sublink {{if eq $.ActiveNodeItem "docker-images"}}active{{end}}"
+      href="/clusters/{{.}}/nodes/{{$.ActiveNode.ID}}/docker-images"
+    >
+      <span class="name">Docker Images</span>
     </a>
     {{end}}
     {{end}}
