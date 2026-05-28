@@ -2,8 +2,9 @@
 
 @font-face {
   font-family: "Font Awesome 7 Free";
-  src:
-    local("Font Awesome 7 Free"), url("/static/fa6/webfonts/fa-solid-900.woff2");
+  src: url("/static/fa6/webfonts/fa-solid-900.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 900;
 }
 
 :root {

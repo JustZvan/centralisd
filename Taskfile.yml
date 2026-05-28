@@ -1,0 +1,9 @@
+version: '3'
+
+tasks:
+  build:
+    dir: '{{.USER_WORKING_DIR}}'
+    cmds:
+      - mkdir -p dist
+      - go build -o dist/centralisd src/main.go
+

@@ -1,0 +1,32 @@
+.fa-solid {
+  font-family: "Font Awesome 7 Free";
+  font-weight: 900;
+}
+
+.fa-solid,
+.fa-solid::before {
+  display: inline-block;
+  font-style: normal;
+  font-variant: normal;
+  line-height: 1;
+  text-rendering: auto;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.fa-solid::before {
+  content: var(--fa);
+}
+
+.fa-server {
+  --fa: "\f233";
+}
+
+.fa-cog,
+.fa-gear {
+  --fa: "\f013";
+}
+
+.fa-xmark {
+  --fa: "\f00d";
+}

@@ -4,18 +4,18 @@ import (
 	"centralisd/src/core/protocol"
 	"centralisd/src/orchestrator/registry"
 	"centralisd/src/orchestrator/tcp"
+	cstatic "centralisd/static"
 	ctmpl "centralisd/templates"
 	"encoding/json"
 	"errors"
 	"html/template"
+	"io/fs"
 	"log"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 )
-
-// TODO: Bundle templates with the app
 
 type viewData struct {
 	Title             string
@@ -114,7 +114,11 @@ func ServeWeb(store *registry.Store, listenAddr string) {
 		panic(err)
 	}
 
-	static := http.FileServer(http.Dir("static"))
+	staticFS, err := fs.Sub(cstatic.FS, ".")
+	if err != nil {
+		panic(err)
+	}
+	static := http.FileServer(http.FS(staticFS))
 	app.Handle("/static/", http.StripPrefix("/static/", static))
 
 	render := func(w http.ResponseWriter, tmpl *template.Template, data viewData) {
