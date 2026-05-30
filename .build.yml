@@ -1,0 +1,17 @@
+image: debian/trixie
+arch: amd64
+packages:
+    - golang
+    - libvirt-dev
+    - pkg-config
+sources:
+    - "https://git.sr.ht/~justzvan/centralisd"
+shell: true
+tasks:
+    - setup: |
+        go install github.com/go-task/task/v3/cmd/task@latest
+    - build: |
+        cd centralisd
+        ~/go/bin/task build
+artifacts:
+    - centralisd/dist/centralisd
